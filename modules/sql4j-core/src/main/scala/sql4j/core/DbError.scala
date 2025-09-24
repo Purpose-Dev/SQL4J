@@ -1,13 +1,16 @@
 package sql4j.core
 
 sealed trait DbError extends Throwable:
-		def msg: String
+		def message: String
 
-		override def getMessage: String = msg
+		override def getMessage: String = message
 
 object DbError:
-		case class NotFound(msg: String) extends DbError
+		case class UnsupportedOperationError(message: String) extends DbError:
+				override def getMessage: String = s"Operation not supported: $message."
 
-		case class DuplicateKey(msg: String) extends DbError
+		case class RowNotFound(rowId: RowId) extends DbError:
+				override def message: String = s"Row with ID: '$rowId' not found."
 
-		case class TransactionFailed(msg: String) extends DbError
+		case class DuplicateRowFound(rowId: RowId) extends DbError:
+				override def message: String = s"Row with ID: '$rowId' has duplicate."

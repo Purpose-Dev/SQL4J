@@ -63,17 +63,19 @@ object CoreSpec extends ZIOSpecDefault:
 								assertTrue(id.isEmpty)
 						},
 						suite("DbError")(
-								test("NotFound should be throwable") {
-										val err: Throwable = DbError.NotFound("missing row")
-										assertTrue(err.getMessage.contains("missing row"))
+								test("UnsupportedOperationError should be throwable") {
+										val err: Throwable = DbError.UnsupportedOperationError("'SELECT WHERE'")
+										assertTrue(err.getMessage.contains("Operation not supported: 'SELECT WHERE'."))
+								},
+								test("RowNotFound should be throwable") {
+										val rowId: RowId = RowId(1L)
+										val err: Throwable = DbError.RowNotFound(rowId)
+										assertTrue(err.getMessage.contains("Row with ID: '1' not found."))
 								},
 								test("DuplicateKey should be throwable") {
-										val err: Throwable = DbError.DuplicateKey("duplicate key error")
-										assertTrue(err.getMessage.contains("duplicate"))
-								},
-								test("TransactionFailed should be throwable") {
-										val err: Throwable = DbError.TransactionFailed("tx aborted")
-										assertTrue(err.getMessage.contains("aborted"))
+										val rowId: RowId = RowId(1L)
+										val err: Throwable = DbError.DuplicateRowFound(rowId)
+										assertTrue(err.getMessage.contains("Row with ID: '1' has duplicate."))
 								}
 						)
 				)
