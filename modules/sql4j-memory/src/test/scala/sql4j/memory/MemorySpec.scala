@@ -1,8 +1,8 @@
 package sql4j.memory
 
 import zio.test.*
-import zio.{Scope, ZIO, durationInt}
-import sql4j.memory.page.{Page, PageId}
+import zio.{Scope, ZIO}
+import sql4j.memory.page.Page
 
 object MemorySpec extends ZIOSpecDefault:
 
