@@ -1,6 +1,6 @@
 package sql4j.memory.page
 
-import sql4j.memory.off_heap.PageLayout
+import sql4j.memory.off_heap.*
 import sql4j.memory.off_heap.PageLayout.MetaField
 import sql4j.memory.off_heap.VarHandleHelpers.*
 
@@ -9,7 +9,7 @@ import java.nio.ByteBuffer
 /**
  * PageHeader: helpers to read/write header fields inside a page ByteBuffer slice.
  *
- * Important: ByteBuffer slice passed here must be positioned at the start of page (0..PageSize-1).
+ * Important: ByteBuffer slice passed here must be positioned at the start of page (0...PageSize-1).
  * VarHandleHelpers uses element indexes (int/long indices) not byte offsets.
  */
 //noinspection ScalaWeakerAccess
@@ -18,10 +18,11 @@ object PageHeader:
 				if byteBuffer.capacity() < PageLayout.PageSize then
 						throw new IllegalArgumentException(s"page buffer capacity ${byteBuffer.capacity()} < ${PageLayout.PageSize}")
 
+// TODO; add buffer alignment after assert of page capacity
 final class PageHeader(private val buffer: ByteBuffer):
 		PageHeader.assertPageCapacity(buffer)
 
-		// Helpers to write primitives at header byte offsets
+		// Helpers to write/read primitives at byte offsets (for simple fields)
 		private inline def getIntAtByteOffset(offset: Int): Int =
 				buffer.getInt(offset)
 
@@ -45,68 +46,83 @@ final class PageHeader(private val buffer: ByteBuffer):
 		def getSegmentId: Long = getLongAtByteOffset(PageLayout.HEADER_SEGMENT_ID_OFFSET)
 
 		// MetaAtomic stored as a long at HEADER_META_OFFSET; we want CAS/pin increments on that field.
-		// We'll use VarHandleHelpers.LONG_VH operating on long-array view; convert byte-offset -> long index:
+		// Use VarHandleHelpers.LONG_VH operating on long-array view; convert byte-offset -> long-element index:
 		private inline def longIndexForMeta(): Int = PageLayout.HEADER_META_OFFSET / java.lang.Long.BYTES
 
 		def getMetaAtomicVolatile: Long =
-				// use VarHandle getVolatile (index relative to long elements)
+				// element index must be Int
 				getVolatileLong(buffer, longIndexForMeta())
 
-		def compareAndSetMetaAtomic(expected: Long, update: Long): Boolean =
+		private def compareAndSetMetaAtomic(expected: Long, update: Long): Boolean =
 				compareAndSetLong(buffer, longIndexForMeta(), expected, update)
+
+		private inline def metaAddDelta(delta: Long): Long =
+				getAndAddLong(buffer, longIndexForMeta(), delta)
 
 		def getPinnedCountFromMeta(meta: Long): Int =
 				((meta & MetaField.PINNED_MASK) >>> MetaField.PINNED_SHIFT).toInt
 
 		def tryPin(): Boolean =
-				// spin CAS increment on pinned field
-				while true do
-						val current = getMetaAtomicVolatile
-						val pinned = getPinnedCountFromMeta(current)
-						if pinned >= (1 << MetaField.PINNED_SHIFT - 1) then
-								return false
-						val next = current + (1L << MetaField.PINNED_SHIFT)
-						if compareAndSetMetaAtomic(current, next) then
-								return true
-				false
+				val maxPinned = (1L << MetaField.PINNED_BITS) - 1L
+
+				@annotation.tailrec
+				def loop(): Boolean =
+						val cur = getMetaAtomicVolatile
+						val pinned = getPinnedCountFromMeta(cur)
+						if pinned >= maxPinned then
+								false
+						else
+								val next = cur + (1L << MetaField.PINNED_SHIFT)
+								if compareAndSetMetaAtomic(cur, next) then
+										true
+								else
+										loop()
+
+				loop()
 
 		def unpin(): Unit =
 				@annotation.tailrec
 				def loop(): Unit =
 						val current = getMetaAtomicVolatile
 						val pinned = getPinnedCountFromMeta(current)
-						if pinned >= (1L << MetaField.PINNED_SHIFT) then
-								throw IllegalStateException("unpin underflow")
+						if pinned <= 0 then
+								throw new IllegalStateException("unpin underflow")
 						val next = current - (1L << MetaField.PINNED_SHIFT)
 						if !compareAndSetMetaAtomic(current, next) then
 								loop()
 
 				loop()
 
-				// flags helpers (stored in metaAtomic)
-				def setFlag(flagMask: Long): Unit =
-						@annotation.tailrec
-						def loop(): Unit =
-								val current = getMetaAtomicVolatile
-								val next = current | (flagMask << MetaField.FLAGS_SHIFT)
-								if !compareAndSetMetaAtomic(current, next) then
-										loop()
+		// flags helpers (stored in metaAtomic)
+		def setFlag(flagMask: Long): Unit =
+				@annotation.tailrec
+				def loop(): Unit =
+						val current = getMetaAtomicVolatile
+						val flagsPart = (current & MetaField.FLAGS_MASK) >>> MetaField.FLAGS_SHIFT
+						val next = (current & ~MetaField.FLAGS_MASK) | (((flagsPart | flagMask)
+							<< MetaField.FLAGS_SHIFT) & MetaField.FLAGS_MASK)
+						if !compareAndSetMetaAtomic(current, next) then
+								loop()
 
-						loop()
+				loop()
 
-				def clearFlag(flagMask: Long): Unit =
-						@annotation.tailrec
-						def loop(): Unit =
-								val current = getMetaAtomicVolatile
-								val next = current & ~(flagMask << MetaField.FLAGS_SHIFT)
-								if !compareAndSetMetaAtomic(current, next) then
-										loop()
+		def clearFlag(flagMask: Long): Unit =
+				@annotation.tailrec
+				def loop(): Unit =
+						val current = getMetaAtomicVolatile
+						val flagsPart = (current & MetaField.FLAGS_MASK) >>> MetaField.FLAGS_SHIFT
+						val newFlags = flagsPart & (~flagMask)
+						val next = (current & ~MetaField.FLAGS_MASK)
+							| ((newFlags << MetaField.FLAGS_SHIFT) & MetaField.FLAGS_MASK)
+						if !compareAndSetMetaAtomic(current, next) then
+								loop()
 
-						loop()
+				loop()
 
 		def hasFlag(flagMask: Long): Boolean =
 				val current = getMetaAtomicVolatile
-				((current & MetaField.FLAGS_MASK) >>> MetaField.FLAGS_SHIFT & flagMask) != 0L;
+				val flagsPart = (current & MetaField.FLAGS_MASK) >>> MetaField.FLAGS_SHIFT
+				(flagsPart & flagMask) != 0L
 
 		// LSN Field (long) at HEADER_LSN_OFFSET
 		private inline def longIndexForLsn(): Int = PageLayout.HEADER_LSN_OFFSET / java.lang.Long.BYTES

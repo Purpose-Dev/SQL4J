@@ -10,15 +10,18 @@ import java.nio.{ByteBuffer, ByteOrder}
  * - LONG_VH: view for Array[Long], native order
  *
  * These VarHandles enable atomic operations such as getAndAdd/compareAndSet directly on ByteBuffer.
+ *
+ * IMPORTANT: VarHandle produced by byteBufferViewVarHandle expects an index of type Int
+ * representing the element index (not a byte offset). For longs the index counts 8-byte words.
  */
 object VarHandleHelpers:
 		private val MH = MethodHandles.lookup()
 
-		val INT_VH: VarHandle =
-				MethodHandles.byteBufferViewVarHandle(classOf[Array[Int]], ByteOrder.nativeOrder)
+		private val INT_VH: VarHandle =
+				MethodHandles.byteBufferViewVarHandle(classOf[Array[Int]], ByteOrder.nativeOrder())
 
-		val LONG_VH: VarHandle =
-				MethodHandles.byteBufferViewVarHandle(classOf[Array[Long]], ByteOrder.nativeOrder)
+		private val LONG_VH: VarHandle =
+				MethodHandles.byteBufferViewVarHandle(classOf[Array[Long]], ByteOrder.nativeOrder())
 
 		inline def getVolatileInt(bb: ByteBuffer, idx: Int): Int =
 				INT_VH.getVolatile(bb, idx).asInstanceOf[Int]
@@ -29,15 +32,15 @@ object VarHandleHelpers:
 		inline def compareAndSetInt(bb: ByteBuffer, idx: Int, expected: Int, newVal: Int): Boolean =
 				INT_VH.compareAndSet(bb, idx, expected, newVal)
 
-		inline def getVolatileLong(bb: ByteBuffer, idx: Long): Long =
+		// ---- LONG helpers: index MUST be Int (element index), not a byte offset
+		inline def getVolatileLong(bb: ByteBuffer, idx: Int): Long =
 				LONG_VH.getVolatile(bb, idx).asInstanceOf[Long]
 
-		inline def setVolatileLong(bb: ByteBuffer, idx: Long, value: Long): Unit =
+		inline def setVolatileLong(bb: ByteBuffer, idx: Int, value: Long): Unit =
 				LONG_VH.setVolatile(bb, idx, value)
 
-		inline def getAndAddLong(bb: ByteBuffer, idx: Long, delta: Long): Long =
+		inline def getAndAddLong(bb: ByteBuffer, idx: Int, delta: Long): Long =
 				LONG_VH.getAndAdd(bb, idx, delta).asInstanceOf[Long]
 
-		inline def compareAndSetLong(bb: ByteBuffer, idx: Long, expected: Long, newVal: Long): Boolean =
+		inline def compareAndSetLong(bb: ByteBuffer, idx: Int, expected: Long, newVal: Long): Boolean =
 				LONG_VH.compareAndSet(bb, idx, expected, newVal)
-
