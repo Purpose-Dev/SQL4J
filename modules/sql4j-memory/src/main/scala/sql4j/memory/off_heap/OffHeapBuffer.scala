@@ -32,22 +32,55 @@ trait OffHeapBuffer:
 object OffHeapBuffer:
 		def wrap(byteBuffer: ByteBuffer): OffHeapBuffer = DefaultOffHeapBuffer(byteBuffer)
 
-private final class DefaultOffHeapBuffer(private val bb0: ByteBuffer) extends OffHeapBuffer:
-		require(bb0 != null, "ByteBuffer must not be null")
+private final class DefaultOffHeapBuffer(private val origin: ByteBuffer) extends OffHeapBuffer:
+		require(origin != null, "ByteBuffer must not be null")
 
-		// ensure direct buffer for intended usage
-		override val byteBuffer: ByteBuffer = bb0
+		private val alignedBuffer: ByteBuffer =
+				try
+						val clazz = origin.getClass
+						val addressMethod = clazz.getMethod("address")
+						addressMethod.setAccessible(true)
+						val baseAddress = addressMethod.invoke(origin).asInstanceOf[Long]
 
-		override val capacity: Int = bb0.capacity()
+						val align = 8L
+						val mod = (baseAddress % align).toInt
+						if mod eq 0 then
+								// already aligned - use original buffer (duplicate to avoid mutating position/limit)
+								val dup = origin.duplicate()
+								dup.clear()
+								dup
+						else
+								val pad = (align - mod).toInt
+								// create a duplicate, advance position by pad and slice
+								val dup = origin.duplicate()
+								// ensure capacity/padding fits
+								if dup.capacity() <= pad then
+										// impossible, fallback to unaligned (will likely fail VarHandle)
+										dup.clear()
+										dup
+								else
+										dup.position(pad)
+										dup.limit(dup.capacity())
+										dup.slice()
+				catch
+						case NonFatal(_) =>
+								// reflection failed — best-effort fallback: use original duplicate.
+								val dup = origin.duplicate()
+								dup.clear()
+								dup
+
+		override val byteBuffer: ByteBuffer = alignedBuffer
+
+		override val capacity: Int = origin.capacity()
 
 		// try to extract native address via reflection (best-effort)
 		override lazy val addressOpt: Option[Long] =
 				try
 						// Works on some JVMs: sun.nio.ch.DirectBuffer#getAddress or jdk.internal.ref.* access
-						val directBufClass = bb0.getClass
-						val getAddress = directBufClass.getMethod("address")
-						val address = getAddress.invoke(bb0).asInstanceOf[Long]
-						Some(address)
+						val originClazz = origin.getClass
+						val addressMethod = originClazz.getMethod("address")
+						val address = addressMethod.invoke(origin).asInstanceOf[Long]
+						Some(addressMethod.invoke(origin).asInstanceOf[Long] + (origin.position() - alignedBuffer.position()))
 				catch
 						case _: Throwable => None
 
@@ -56,12 +89,12 @@ private final class DefaultOffHeapBuffer(private val bb0: ByteBuffer) extends Of
 				// try common trick: call cleaner if present
 				ZIO.succeed {
 						try
-								val clazz = bb0.getClass
+								val clazz = origin.getClass
 								try
 										// For many JVMs: DirectByteBuffer has a 'cleaner' method (JDK8) or a 'cleaner' field
 										val getCleaner: Method = clazz.getMethod("cleaner")
 										getCleaner.setAccessible(true)
-										val cleaner = getCleaner.invoke(bb0)
+										val cleaner = getCleaner.invoke(origin)
 										if cleaner ne null then
 												val cleanMethod = cleaner.getClass.getMethod("clean")
 												cleanMethod.setAccessible(true)

@@ -18,7 +18,6 @@ object PageHeader:
 				if byteBuffer.capacity() < PageLayout.PageSize then
 						throw new IllegalArgumentException(s"page buffer capacity ${byteBuffer.capacity()} < ${PageLayout.PageSize}")
 
-// TODO; add buffer alignment after assert of page capacity
 final class PageHeader(private val buffer: ByteBuffer):
 		PageHeader.assertPageCapacity(buffer)
 
@@ -49,12 +48,14 @@ final class PageHeader(private val buffer: ByteBuffer):
 		// Use VarHandleHelpers.LONG_VH operating on long-array view; convert byte-offset -> long-element index:
 		private inline def longIndexForMeta(): Int = PageLayout.HEADER_META_OFFSET / java.lang.Long.BYTES
 
+		private inline def metaOffset: Int = PageLayout.HEADER_META_OFFSET
+
 		def getMetaAtomicVolatile: Long =
 				// element index must be Int
-				getVolatileLong(buffer, longIndexForMeta())
+				getVolatileLong(buffer, metaOffset)
 
 		private def compareAndSetMetaAtomic(expected: Long, update: Long): Boolean =
-				compareAndSetLong(buffer, longIndexForMeta(), expected, update)
+				compareAndSetLong(buffer, metaOffset, expected, update)
 
 		private inline def metaAddDelta(delta: Long): Long =
 				getAndAddLong(buffer, longIndexForMeta(), delta)
@@ -125,8 +126,8 @@ final class PageHeader(private val buffer: ByteBuffer):
 				(flagsPart & flagMask) != 0L
 
 		// LSN Field (long) at HEADER_LSN_OFFSET
-		private inline def longIndexForLsn(): Int = PageLayout.HEADER_LSN_OFFSET / java.lang.Long.BYTES
+		private inline def lsnOffset: Int = PageLayout.HEADER_LSN_OFFSET
 
-		def setLsn(lsn: Long): Unit = setVolatileLong(buffer, longIndexForLsn(), lsn)
+		def setLsn(lsn: Long): Unit = setVolatileLong(buffer, lsnOffset, lsn)
 
-		def getLsn: Long = getVolatileLong(buffer, longIndexForLsn())
+		def getLsn: Long = getVolatileLong(buffer, lsnOffset)
