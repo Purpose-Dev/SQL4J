@@ -83,3 +83,34 @@ final class PageHeader(private val buffer: ByteBuffer):
 
 				loop()
 
+				// flags helpers (stored in metaAtomic)
+				def setFlag(flagMask: Long): Unit =
+						@annotation.tailrec
+						def loop(): Unit =
+								val current = getMetaAtomicVolatile
+								val next = current | (flagMask << MetaField.FLAGS_SHIFT)
+								if !compareAndSetMetaAtomic(current, next) then
+										loop()
+
+						loop()
+
+				def clearFlag(flagMask: Long): Unit =
+						@annotation.tailrec
+						def loop(): Unit =
+								val current = getMetaAtomicVolatile
+								val next = current & ~(flagMask << MetaField.FLAGS_SHIFT)
+								if !compareAndSetMetaAtomic(current, next) then
+										loop()
+
+						loop()
+
+		def hasFlag(flagMask: Long): Boolean =
+				val current = getMetaAtomicVolatile
+				((current & MetaField.FLAGS_MASK) >>> MetaField.FLAGS_SHIFT & flagMask) != 0L;
+
+		// LSN Field (long) at HEADER_LSN_OFFSET
+		private inline def longIndexForLsn(): Int = PageLayout.HEADER_LSN_OFFSET / java.lang.Long.BYTES
+
+		def setLsn(lsn: Long): Unit = setVolatileLong(buffer, longIndexForLsn(), lsn)
+
+		def getLsn: Long = getVolatileLong(buffer, longIndexForLsn())
