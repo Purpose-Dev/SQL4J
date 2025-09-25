@@ -33,14 +33,14 @@ object VarHandleHelpers:
 				INT_VH.compareAndSet(bb, idx, expected, newVal)
 
 		// ---- LONG helpers: index MUST be Int (element index), not a byte offset
-		inline def getVolatileLong(bb: ByteBuffer, idx: Int): Long =
-				LONG_VH.getVolatile(bb, idx).asInstanceOf[Long]
+		inline def getVolatileLong(bb: ByteBuffer, byteOffset: Int): Long =
+				LONG_VH.getVolatile(bb, byteOffset).asInstanceOf[Long]
 
-		inline def setVolatileLong(bb: ByteBuffer, idx: Int, value: Long): Unit =
-				LONG_VH.setVolatile(bb, idx, value)
+		inline def setVolatileLong(bb: ByteBuffer, byteOffset: Int, value: Long): Unit =
+				LONG_VH.setVolatile(bb, byteOffset, value)
 
-		inline def getAndAddLong(bb: ByteBuffer, idx: Int, delta: Long): Long =
-				LONG_VH.getAndAdd(bb, idx, delta).asInstanceOf[Long]
+		inline def getAndAddLong(bb: ByteBuffer, byteOffset: Int, delta: Long): Long =
+				LONG_VH.getAndAdd(bb, byteOffset, delta).asInstanceOf[Long]
 
-		inline def compareAndSetLong(bb: ByteBuffer, idx: Int, expected: Long, newVal: Long): Boolean =
-				LONG_VH.compareAndSet(bb, idx, expected, newVal)
+		inline def compareAndSetLong(bb: ByteBuffer, byteOffset: Int, expected: Long, newVal: Long): Boolean =
+				LONG_VH.compareAndSet(bb, byteOffset, expected, newVal)
