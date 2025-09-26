@@ -9,14 +9,15 @@ package sql4j.memory.off_heap
  * platform, but VarHandle uses native order).
  *
  * Offsets (in bytes):
- * 	- HEADER_PAGE_ID_OFFSET    = 0x00  (8 bytes)
- * 	- HEADER_SEGMENT_ID_OFFSET = 0x08  (8 bytes)
- * 	- HEADER_META_OFFSET       = 0x10  (8 bytes)  // metaAtomic (bitfield, AtomicLong)
- * 	- HEADER_LSN_OFFSET        = 0x18  (8 bytes)
- * 	- HEADER_INDEX_OFFSET      = 0x20  (4 bytes)  // slot/index area offset (uint32)
- * 	- HEADER_INDEX_NENTRIES    = 0x24  (4 bytes)
- * 	- HEADER_CHECKSUM_OFFSET   = 0x28  (4 bytes)
- * 	- HEADER_RESERVED          = 0x2C  (36 bytes) // padding -> total header 64 bytes
+ * 	- HEADER_PAGE_ID_OFFSET    			= 0x00  (8 bytes)
+ * 	- HEADER_SEGMENT_ID_OFFSET 			= 0x08  (8 bytes)
+ * 	- HEADER_META_OFFSET       			= 0x10  (8 bytes)  // metaAtomic (bitfield, AtomicLong)
+ * 	- HEADER_LSN_OFFSET        			= 0x18  (8 bytes)
+ * 	- HEADER_INDEX_OFFSET      			= 0x20  (4 bytes)  // slot/index area offset (uint32)
+ * 	- HEADER_INDEX_NENTRIES    			= 0x24  (4 bytes)
+ * 	- HEADER_CHECKSUM_OFFSET   			= 0x28  (4 bytes)
+ * 	- HEADER_FREE_POINTER_OFFSET		= 0x2C  (4 bytes)
+ * 	- HEADER_RESERVED          			= 0x30 (16 bytes) // padding -> total header 64 bytes
  *
  * @note keep header size = 64 for alignment on cache lines.
  */
@@ -32,8 +33,16 @@ object PageLayout:
 		final val HEADER_INDEX_OFFSET = 0x20
 		final val HEADER_INDEX_NENTRIES = 0x24
 		final val HEADER_CHECKSUM_OFFSET = 0x28
+		final val HEADER_FREE_POINTER_OFFSET = 0x2C
 		// reserved until 0x40 (64)
 		final val HEADER_END = HeaderBytes
+
+		require(
+				HEADER_END == HeaderBytes,
+				s"Page header size mismatch: expected $HeaderBytes, got $HEADER_END"
+		)
+
+		final val SLOT_BYTES: Int = 8
 
 		// metaAtomic bitfield layout (64 bits)
 		object MetaField:

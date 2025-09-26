@@ -21,6 +21,10 @@ object PageHeader:
 final class PageHeader(private val buffer: ByteBuffer):
 		PageHeader.assertPageCapacity(buffer)
 
+		def init(): Unit =
+				buffer.putInt(PageLayout.HEADER_INDEX_NENTRIES, 0)
+				buffer.putInt(PageLayout.HEADER_FREE_POINTER_OFFSET, PageLayout.PageSize)
+
 		// Helpers to write/read primitives at byte offsets (for simple fields)
 		private inline def getIntAtByteOffset(offset: Int): Int =
 				buffer.getInt(offset)
@@ -131,3 +135,16 @@ final class PageHeader(private val buffer: ByteBuffer):
 		def setLsn(lsn: Long): Unit = setVolatileLong(buffer, lsnOffset, lsn)
 
 		def getLsn: Long = getVolatileLong(buffer, lsnOffset)
+
+		def getFreeSpacePointer: Int =
+				buffer.getInt(PageLayout.HEADER_FREE_POINTER_OFFSET)
+
+		def setFreeSpacePointer(ptr: Int): Unit =
+				buffer.putInt(PageLayout.HEADER_FREE_POINTER_OFFSET, ptr)
+
+		def getNEntries: Int =
+				buffer.getInt(PageLayout.HEADER_INDEX_NENTRIES)
+
+		def incrementNEntries(): Unit =
+				val n: Int = getNEntries + 1
+				buffer.putInt(PageLayout.HEADER_INDEX_NENTRIES, n)
