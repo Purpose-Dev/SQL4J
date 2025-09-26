@@ -44,11 +44,11 @@ object DbError:
 		case class DuplicateRowFound(rowId: RowId) extends DbError:
 				override def message: String = s"Row with ID: '$rowId' has duplicate."
 
-		case class PageFullError(message: String) extends DbError:
-				override def getMessage: String = s"Page has no more free space: '$message'."
+		case class PageFullError(needed: Int) extends DbError:
+				override def message: String = s"Not enough space in page for $needed bytes."
 
-		case class SlotNotFoundError(message: String, slotId: Int) extends DbError:
-				override def getMessage: String = s"Slot with slotId: '$slotId' not found."
+		case class SlotNotFoundError(slotId: Int) extends DbError:
+				override def message: String = s"Slot with slotId: '$slotId' not found."
 
 		case class RecordNotFound(message: String) extends DbError
 

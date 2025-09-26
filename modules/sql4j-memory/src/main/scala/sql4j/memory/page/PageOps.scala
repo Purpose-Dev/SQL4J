@@ -13,7 +13,7 @@ object PageOps:
 				val newPtr = freePtr - required
 
 				if newPtr <= PageLayout.HEADER_END then
-						throw DbError.PageFullError("Cannot insert record into the page payload area.")
+						throw DbError.PageFullError(required)
 				// Write payload
 				buf.position(newPtr)
 				buf.put(data)
@@ -37,4 +37,4 @@ object PageOps:
 
 		def deleteRecord(buf: ByteBuffer, slotId: Int): Unit =
 				if !SlotDirectory.removeSlot(buf, slotId) then
-						throw DbError.SlotNotFoundError("", slotId)
+						throw DbError.SlotNotFoundError(slotId)
