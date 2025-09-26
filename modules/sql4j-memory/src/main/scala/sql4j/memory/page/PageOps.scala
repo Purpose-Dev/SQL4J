@@ -19,17 +19,47 @@ object PageOps:
 						}
 				}
 
+				val sortedSlots = liveSlots.sortBy(-_._2)
+
 				var freePtr = PageLayout.PageSize
-				liveSlots.sortBy(-_._2).foreach { case (slotId, oldOffset, len) =>
-						freePtr -= len
-						if oldOffset != freePtr then
-								val tmp = new Array[Byte](len)
-								buf.position(oldOffset)
+				var currentBlockStart = -1
+				var currentBlockLen = 0
+				var currentSlots = Vector.empty[(Int, Int, Int)]
+
+				def flushBlock(): Unit =
+						if currentBlockStart >= 0 then
+								val tmp = new Array[Byte](currentBlockLen)
+								buf.position(currentBlockStart)
 								buf.get(tmp)
-								buf.position(freePtr)
+								buf.position(freePtr - currentBlockLen)
 								buf.put(tmp)
-								SlotDirectory.writeSlot(buf, slotId, freePtr, len)
+
+								var offsetPtr = freePtr - currentBlockLen
+								currentSlots.foreach { case (slotId, _, len) =>
+										SlotDirectory.writeSlot(buf, slotId, offsetPtr, len)
+										offsetPtr += len
+								}
+								freePtr -= currentBlockLen
+								currentBlockStart = -1
+								currentBlockLen = 0
+								currentSlots = Vector.empty
+
+				sortedSlots.foreach { case (slotId, offset, len) =>
+						if currentBlockStart == -1 then
+								currentBlockStart = offset
+								currentBlockLen = len
+								currentSlots = Vector((slotId, offset, len))
+						else if offset + len == currentBlockStart then
+								currentBlockStart = offset
+								currentBlockLen += len
+								currentSlots :+= ((slotId, offset, len))
+						else
+								flushBlock()
+								currentBlockStart = offset
+								currentBlockLen = len
+								currentSlots = Vector((slotId, offset, len))
 				}
+				flushBlock()
 
 				assert(freePtr >= PageLayout.HEADER_END, s"freePtr=$freePtr < HEADER_END after compaction!")
 				header.setFreeSpacePointer(freePtr)
