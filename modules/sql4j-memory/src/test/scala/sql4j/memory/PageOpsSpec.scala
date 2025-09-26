@@ -189,5 +189,38 @@ object PageOpsSpec extends ZIOSpecDefault:
 								assert(data.nonEmpty)
 						}
 						assertTrue(header.getFreeSpacePointer >= PageLayout.HEADER_END)
+				},
+				test("optimized compaction moves contiguous blocks efficiently") {
+						val buf = ByteBuffer.allocateDirect(PageLayout.PageSize)
+						val header = PageHeader(buf)
+						header.init()
+
+						val rnd = new Random(123)
+						var live = Map.empty[Int, Array[Byte]]
+
+						val slots = (0 until 50).map { _ =>
+								val size = rnd.nextInt(20) + 1
+								val data = Array.fill(size)(rnd.nextInt(256).toByte)
+								val slot = PageOps.insertRecord(buf, header, data)
+								live += (slot -> data)
+								slot
+						}
+
+						val toDelete = rnd.shuffle(slots).take(20)
+						toDelete.foreach { s =>
+								PageOps.deleteRecord(buf, s)
+								live -= s
+						}
+
+						val bigRecord = Array.fill(150)(42.toByte)
+						val newSlot = PageOps.insertRecordWithCompaction(buf, header, bigRecord)
+						live += (newSlot -> bigRecord)
+
+						live.foreach { case (slot, expected) =>
+								val actual = PageOps.readRecord(buf, slot)
+								assertTrue(actual.sameElements(expected))
+						}
+
+						assertTrue(header.getFreeSpacePointer >= PageLayout.HEADER_END)
 				}
 		)
