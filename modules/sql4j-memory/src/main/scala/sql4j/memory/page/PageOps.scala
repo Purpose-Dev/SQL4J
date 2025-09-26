@@ -14,14 +14,20 @@ object PageOps:
 
 				if newPtr <= PageLayout.HEADER_END then
 						throw DbError.PageFullError(required)
+
 				// Write payload
 				buf.position(newPtr)
 				buf.put(data)
+
 				// Allocate slot
 				val slotId = SlotDirectory.allocSlot(buf, newPtr, required)
+
 				// Update header
 				header.setFreeSpacePointer(newPtr)
-				header.incrementNEntries()
+
+				// Increment NEntries (Note: only if a new slot)
+				if slotId >= header.getNEntries then
+						header.incrementNEntries()
 
 				slotId
 
