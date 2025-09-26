@@ -64,18 +64,18 @@ object CoreSpec extends ZIOSpecDefault:
 						},
 						suite("DbError")(
 								test("UnsupportedOperationError should be throwable") {
-										val err: Throwable = DbError.UnsupportedOperationError("'SELECT WHERE'")
-										assertTrue(err.getMessage.contains("Operation not supported: 'SELECT WHERE'."))
+										val err: Throwable = DbError.UnsupportedOperationError("SELECT WHERE")
+										assertTrue(err.getMessage.contains("Operation not supported: 'SELECT WHERE'"))
 								},
 								test("RowNotFound should be throwable") {
 										val rowId: RowId = RowId(1L)
 										val err: Throwable = DbError.RowNotFound(rowId)
-										assertTrue(err.getMessage.contains("Row with ID: '1' not found."))
+										assertTrue(err.getMessage.contains("Row with ID: '1' not found"))
 								},
 								test("DuplicateKey should be throwable") {
 										val rowId: RowId = RowId(1L)
 										val err: Throwable = DbError.DuplicateRowFound(rowId)
-										assertTrue(err.getMessage.contains("Row with ID: '1' has duplicate."))
+										assertTrue(err.getMessage.contains("Row with ID: '1' has duplicate"))
 								}
 						)
 				)

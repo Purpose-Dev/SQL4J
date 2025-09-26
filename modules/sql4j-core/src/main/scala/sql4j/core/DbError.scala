@@ -26,7 +26,7 @@ object DbError:
 		 * @param message A descriptive message explaining what operation is unsupported
 		 */
 		case class UnsupportedOperationError(message: String) extends DbError:
-				override def getMessage: String = s"Operation not supported: $message"
+				override def getMessage: String = s"Operation not supported: '$message''"
 
 		/**
 		 * Error indicating that a requested row could not be found based on its logical ID.
