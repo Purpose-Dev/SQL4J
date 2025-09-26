@@ -38,6 +38,11 @@ final class PageHeader(private val buffer: ByteBuffer):
 		private inline def putLongAtByteOffset(offset: Int, v: Long): Unit =
 				buffer.putLong(offset, v)
 
+		// Slot table start/end
+		private inline def slotTableStart: Int = PageLayout.HEADER_END
+
+		private inline def slotTableEnd: Int = slotTableStart + getNEntries * PageLayout.SLOT_BYTES
+
 		// pageId
 		def setPageId(id: Long): Unit = putLongAtByteOffset(PageLayout.HEADER_PAGE_ID_OFFSET, id)
 
@@ -148,3 +153,6 @@ final class PageHeader(private val buffer: ByteBuffer):
 		def incrementNEntries(): Unit =
 				val n: Int = getNEntries + 1
 				buffer.putInt(PageLayout.HEADER_INDEX_NENTRIES, n)
+
+		def canFit(size: Int): Boolean =
+				getFreeSpacePointer - size >= slotTableEnd
