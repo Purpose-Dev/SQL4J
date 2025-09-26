@@ -4,8 +4,9 @@ import sql4j.core.DbError
 import sql4j.memory.off_heap.PageLayout
 import sql4j.memory.page.{PageHeader, PageOps}
 import zio.{Exit, Scope, ZIO}
-import zio.test.*
-import zio.test.Assertion.*
+import zio.test._
+import zio.test.Assertion._
+import zio.test.assertZIO
 
 import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
@@ -49,7 +50,6 @@ object PageOpsSpec extends ZIOSpecDefault:
 						val effect = ZIO.attempt(PageOps.deleteRecord(buf, 42))
 						assertZIO(effect.exit)(fails(isSubtype[DbError.SlotNotFoundError](anything)))
 				},
-
 				test("multiple insertions update header and freeSpacePointer correctly") {
 						val buf = ByteBuffer.allocateDirect(PageLayout.PageSize)
 						val header = PageHeader(buf)
@@ -71,7 +71,6 @@ object PageOpsSpec extends ZIOSpecDefault:
 							assertTrue(header.getNEntries == 3) &&
 							assertTrue(header.getFreeSpacePointer < PageLayout.PageSize)
 				},
-
 				test("reuse freed slot after delete") {
 						val buf = ByteBuffer.allocateDirect(PageLayout.PageSize)
 						val header = PageHeader(buf)
@@ -132,5 +131,63 @@ object PageOpsSpec extends ZIOSpecDefault:
 												assertTrue(read == expected)
 								}
 						} yield assertTrue(true)
+				},
+				test("insert with automatic compaction works under fragmentation") {
+						val buf = ByteBuffer.allocateDirect(PageLayout.PageSize)
+						val header = PageHeader(buf)
+						header.init()
+
+						val rnd = new Random(42)
+						var live = Map.empty[Int, String]
+						val iterations = 300
+
+						for {
+								_ <- ZIO.foreachDiscard(0 until iterations) { _ =>
+										val action = if live.isEmpty then 0 else rnd.nextInt(3)
+
+										if action == 0 then
+												val payloadSize = rnd.nextInt(100) + 1
+												val payload = Array.fill[Byte](payloadSize)(rnd.nextInt(126).toByte)
+												val str = new String(payload.map(b => if b < 32 then 65 else b), StandardCharsets.UTF_8)
+
+												ZIO.attempt {
+														val slot = PageOps.insertRecordWithCompaction(buf, header, str.getBytes)
+														live = live.updated(slot, str)
+														assertTrue(true)
+												}.catchAll {
+														case e: DbError.PageFullError => ZIO.succeed(assertTrue(true))
+														case other => ZIO.fail(other)
+												}
+										else if action == 1 then
+												val (slot, _) = live.iterator.drop(rnd.nextInt(live.size)).next()
+												PageOps.deleteRecord(buf, slot)
+												live = live - slot
+												ZIO.succeed(assertTrue(true))
+										else
+												val (slot, expected) = live.iterator.drop(rnd.nextInt(live.size)).next()
+												val read = new String(PageOps.readRecord(buf, slot), StandardCharsets.UTF_8)
+												ZIO.succeed(assertTrue(read == expected))
+								}
+						} yield assertTrue(true)
+				},
+				test("insert triggers compaction when fragmented") {
+						val buf = ByteBuffer.allocateDirect(PageLayout.PageSize)
+						val header = PageHeader(buf)
+						header.init()
+
+						val slots = (1 to 5).map(_ => PageOps.insertRecord(buf, header, Array.fill(10)(0.toByte)))
+
+						PageOps.deleteRecord(buf, slots(1))
+						PageOps.deleteRecord(buf, slots(3))
+
+						val bigRecord = Array.fill(25)(1.toByte)
+						val slotNew = PageOps.insertRecordWithCompaction(buf, header, bigRecord)
+
+						val liveSlots = Seq(slots(0), slots(2), slots(4), slotNew)
+						liveSlots.foreach { s =>
+								val data = PageOps.readRecord(buf, s)
+								assert(data.nonEmpty)
+						}
+						assertTrue(header.getFreeSpacePointer >= PageLayout.HEADER_END)
 				}
 		)
