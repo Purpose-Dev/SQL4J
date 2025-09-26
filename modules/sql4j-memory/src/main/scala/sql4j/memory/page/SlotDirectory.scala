@@ -23,12 +23,6 @@ object SlotDirectory:
 				require(n >= 0 && n <= maxSlots(), s"Invalid slot count: $n")
 				buf.putInt(PageLayout.HEADER_INDEX_NENTRIES, n)
 
-		private def writeSlot(buf: ByteBuffer, slotIndex: Int, offset: Int, length: Int): Unit =
-				require(slotIndex >= 0 && slotIndex < maxSlots(), s"Invalid slot index: $slotIndex")
-				val pos = slotEntryByteOffset(slotIndex)
-				buf.putInt(pos + SLOT_OFFSET_OFFSET, offset)
-				buf.putInt(pos + SLOT_LENGTH_OFFSET, length)
-
 		private def findFreeSlot(buf: ByteBuffer): Int =
 				val n = slotCount(buf)
 				var i = 0
@@ -38,6 +32,12 @@ object SlotDirectory:
 								return i
 						i += 1
 				-1
+
+		def writeSlot(buf: ByteBuffer, slotIndex: Int, offset: Int, length: Int): Unit =
+				require(slotIndex >= 0 && slotIndex < maxSlots(), s"Invalid slot index: $slotIndex")
+				val pos = slotEntryByteOffset(slotIndex)
+				buf.putInt(pos + SLOT_OFFSET_OFFSET, offset)
+				buf.putInt(pos + SLOT_LENGTH_OFFSET, length)
 
 		def readSlot(buf: ByteBuffer, slotIndex: Int): Option[(Int, Int)] =
 				val n = slotCount(buf)
