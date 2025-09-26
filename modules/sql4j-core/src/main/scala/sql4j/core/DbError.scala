@@ -43,3 +43,20 @@ object DbError:
 		 */
 		case class DuplicateRowFound(rowId: RowId) extends DbError:
 				override def message: String = s"Row with ID: '$rowId' has duplicate."
+
+		case class PageFullError(message: String) extends DbError:
+				override def getMessage: String = s"Page has no more free space $message."
+
+		case class SlotNotFoundError(message: String, slotId: Int) extends DbError:
+				override def getMessage: String = s"Slot with slotId: '$slotId' not found."
+
+		case class RecordNotFound(message: String) extends DbError:
+				override def getMessage: String = s"Record not found in page $message."
+
+		case class InvalidPageStateError(message: String) extends DbError
+
+		case class PageAllocationError(message: String) extends DbError:
+				override def getMessage: String = s"Failed to allocate page $message."
+
+		case class SegmentNotFound(message: String, segmentId: SegmentId) extends DbError:
+				override def getMessage: String = s"Segment not found in page '${segmentId.value}'."
