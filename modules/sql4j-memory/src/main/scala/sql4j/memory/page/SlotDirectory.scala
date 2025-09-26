@@ -63,12 +63,15 @@ object SlotDirectory:
 								setSlotCount(buf, currentCount + 1)
 								currentCount
 
-		def removeSlot(buf: ByteBuffer, slotIndex: Int): Unit =
+		def removeSlot(buf: ByteBuffer, slotIndex: Int): Boolean =
 				val n = slotCount(buf)
 				if slotIndex >= 0 && slotIndex < n then
 						val pos = slotEntryByteOffset(slotIndex)
 						buf.putInt(pos + SLOT_OFFSET_OFFSET, UNUSED_SENTINEL)
 						buf.putInt(pos + SLOT_LENGTH_OFFSET, 0)
+						true
+				else
+						false
 
 		def foreachLiveSlot(buf: ByteBuffer)(f: (Int, Int, Int) => Boolean): Unit =
 				val n = slotCount(buf)
