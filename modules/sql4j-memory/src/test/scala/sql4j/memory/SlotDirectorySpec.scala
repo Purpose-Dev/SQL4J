@@ -29,7 +29,8 @@ object SlotDirectorySpec extends ZIOSpecDefault:
 								case None => assertTrue(false)
 
 						SlotDirectory.removeSlot(buf, s1)
-						val checkRemoved = assertTrue(SlotDirectory.readSlot(buf, s1).isEmpty)
+						val removedEmpty: Boolean = SlotDirectory.readSlot(buf, s1).isEmpty
+						val checkRemoved = assertTrue(removedEmpty)
 						val s3 = SlotDirectory.allocSlot(buf, PageLayout.HeaderBytes + 200, 4)
 						val checkReuse = assertTrue(s3 == s1)
 
