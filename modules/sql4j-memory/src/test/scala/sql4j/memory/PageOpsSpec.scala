@@ -222,5 +222,48 @@ object PageOpsSpec extends ZIOSpecDefault:
 						}
 
 						assertTrue(header.getFreeSpacePointer >= PageLayout.HEADER_END)
+				},
+				test("insertRecordWithCompaction handles fragmentation under stress") {
+						val buf = ByteBuffer.allocateDirect(PageLayout.PageSize)
+						val header = PageHeader(buf)
+						header.init()
+
+						val rnd = new Random(123)
+						var live = Map.empty[Int, Array[Byte]]
+						val iterations = 200
+
+						ZIO.foreachDiscard(0 until iterations) { _ =>
+								val action = if live.isEmpty then 0 else rnd.nextInt(3) // 0=insert, 1=delete, 2=read
+
+								action match
+										case 0 => // insert
+												val size = rnd.nextInt(50) + 1
+												val data = Array.fill(size)(rnd.nextInt(256).toByte)
+												ZIO.attempt(PageOps.insertRecordWithCompaction(buf, header, data)).exit.flatMap {
+														case Exit.Success(slot) =>
+																live += (slot -> data)
+																ZIO.unit
+														case Exit.Failure(cause) =>
+																// Acceptable if page is full
+																assertZIO(ZIO.succeed(cause.squash))(isSubtype[DbError.PageFullError](anything)).unit
+												}
+										case 1 => // delete
+												val (slot, _) = live.iterator.drop(rnd.nextInt(live.size)).next()
+												ZIO.attempt(PageOps.deleteRecord(buf, slot)).map { _ =>
+														live -= slot
+												}
+										case 2 => // read
+												val (slot, expected) = live.iterator.drop(rnd.nextInt(live.size)).next()
+												ZIO.attempt {
+														val actual = PageOps.readRecord(buf, slot)
+														assertTrue(actual.sameElements(expected))
+												}
+						} *> ZIO.attempt {
+								live.foreach { case (slot, expected) =>
+										val actual = PageOps.readRecord(buf, slot)
+										assertTrue(actual.sameElements(expected))
+								}
+								assertTrue(header.getFreeSpacePointer >= PageLayout.HEADER_END)
+						}
 				}
 		)
