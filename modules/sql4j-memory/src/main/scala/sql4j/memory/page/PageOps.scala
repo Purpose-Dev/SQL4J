@@ -7,6 +7,20 @@ import java.nio.ByteBuffer
 
 object PageOps:
 
+		// @formatter:off
+		final case class PageMetrics(
+				pageSize: Int,
+				headerEnd: Int,
+				freePtr: Int,
+				payloadUsedBytes: Int, // 	bytes between freePtr...PageSize
+				liveBytes: Int, // sum(len of live slots)
+				reclaimableBytes: Int, // payloadUsedBytes - liveBytes
+				liveSlots: Int,
+				largesContiguousFree: Int, // largest contiguous free region inside payload+holes (bytes)
+				fragmentationRatio: Double // reclaimable / (reclaimable + largestContiguousFree)
+		)
+
+		// @formatter:on
 		private def compactPage(buf: ByteBuffer, header: PageHeader): Unit =
 				val n = header.getNEntries
 				if n == 0 then
