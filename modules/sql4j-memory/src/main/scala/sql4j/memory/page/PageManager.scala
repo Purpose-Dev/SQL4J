@@ -1,12 +1,12 @@
-package sql4j.memory
+package sql4j.memory.page
 
-import sql4j.memory.page.PageHeader
+import sql4j.memory.MemoryPool
 
 import java.nio.ByteBuffer
 import scala.collection.mutable
 
 class PageManager(pool: MemoryPool):
-		private val pages = mutable.ListBuffer[(ByteBuffer, PageHeader)]()
+		private val pages = mutable.ListBuffer.empty[(ByteBuffer, PageHeader)]
 
 		def newPage(): (ByteBuffer, PageHeader) =
 				val buf = pool.allocatePage()
