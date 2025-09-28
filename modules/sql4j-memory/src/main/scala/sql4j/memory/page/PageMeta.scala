@@ -16,17 +16,22 @@ object PageMeta:
 
 		private val PIN_MASK: Long = ((1L << PIN_BITS) - 1L) << PIN_SHIFT
 		private val REF_MASK: Long = ((1L << REF_BITS) - 1L) << REF_SHIFT
-		private val FLAGS_MASK: Long = ((1L << FLAGS_SHIFT) - 1L) << FLAGS_SHIFT
+		private val FLAGS_MASK: Long = ((1L << FLAGS_BITS) - 1L) << FLAGS_SHIFT
 		private val VER_MASK: Long = ((1L << VER_BITS) - 1L) << VER_SHIFT
 
 		private val PIN_MAX = (1 << PIN_BITS) - 1
 		private val VER_MAX = (1 << VER_BITS) - 1
 
+		private val R_FLAG_DIRTY: Int = 1 << 0
+		private val R_FLAG_MAPPED: Int = 1 << 1
+		private val R_FLAG_COMPACTING: Int = 1 << 2
+		private val R_FLAG_SEALED: Int = 1 << 3
+
 		// Some flags (can be extended in future)
-		val FLAG_DIRTY: Long = 1L << FLAGS_SHIFT // flag bit 0
-		val FLAG_MAPPED: Long = 1L << (FLAGS_SHIFT + 1)
-		val FLAG_COMPACTING: Long = 1L << (FLAGS_SHIFT + 2)
-		val FLAG_SEALED: Long = 1L << (FLAGS_SHIFT + 3)
+		val FLAG_DIRTY: Long = R_FLAG_DIRTY.toLong << FLAGS_SHIFT
+		val FLAG_MAPPED: Long = R_FLAG_MAPPED.toLong << FLAGS_SHIFT
+		val FLAG_COMPACTING: Long = R_FLAG_COMPACTING.toLong << FLAGS_SHIFT
+		val FLAG_SEALED: Long = R_FLAG_SEALED.toLong << FLAGS_SHIFT
 
 		def apply(): PageMeta = new PageMeta(new AtomicLong(0L))
 
@@ -51,7 +56,7 @@ final class PageMeta(private val meta: AtomicLong):
 						val cur = meta.get()
 						val pinned = (cur & PIN_MASK).toInt
 						val flags = ((cur & FLAGS_MASK) >>> FLAGS_SHIFT).toInt
-						if (flags & FLAG_SEALED) != 0 || pinned == PIN_MAX then
+						if (flags & R_FLAG_SEALED) != 0 || pinned == PIN_MAX then
 								return false
 						val next = cur + 1L
 						if meta.compareAndSet(cur, next) then
