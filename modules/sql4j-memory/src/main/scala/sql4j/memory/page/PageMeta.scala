@@ -22,10 +22,10 @@ object PageMeta:
 		private val PIN_MAX = (1 << PIN_BITS) - 1
 		private val VER_MAX = (1 << VER_BITS) - 1
 
-		private val R_FLAG_DIRTY: Int = 1 << 0
-		private val R_FLAG_MAPPED: Int = 1 << 1
-		private val R_FLAG_COMPACTING: Int = 1 << 2
-		private val R_FLAG_SEALED: Int = 1 << 3
+		val R_FLAG_DIRTY: Int = 1 << 0
+		val R_FLAG_MAPPED: Int = 1 << 1
+		val R_FLAG_COMPACTING: Int = 1 << 2
+		val R_FLAG_SEALED: Int = 1 << 3
 
 		// Some flags (can be extended in future)
 		val FLAG_DIRTY: Long = R_FLAG_DIRTY.toLong << FLAGS_SHIFT
