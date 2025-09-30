@@ -11,7 +11,18 @@ class PageManager(pool: MemoryPool, capacity: Int = 128):
 		private val pages = mutable.Map.empty[PageId, PageEntry]
 		private val lru = mutable.LinkedHashMap.empty[PageId, PageEntry]
 
-		private inline def get(pageId: PageId): Option[PageEntry] = pages.get(pageId)
+		private val hits = AtomicLong(0L)
+		private val misses = AtomicLong(0L)
+		private val evictions = AtomicLong(0L)
+
+		private inline def get(pageId: PageId): Option[PageEntry] =
+				pages.get(pageId) match
+						case s@Some(_) =>
+								hits.incrementAndGet()
+								s
+						case None =>
+								misses.incrementAndGet()
+								None
 
 		private inline def touch(id: PageId, entry: PageEntry): Unit =
 				lru.remove(id)
@@ -48,7 +59,7 @@ class PageManager(pool: MemoryPool, capacity: Int = 128):
 						case _ => false
 
 		def unpin(id: PageId): Boolean =
-				pages.get(id).exists(_.meta.tryUnpin())
+				get(id).exists(_.meta.tryUnpin())
 
 		def compareAndSwap(pageId: PageId, expected: PageEntry, update: PageEntry): Boolean =
 				if update.id != pageId then
@@ -77,9 +88,22 @@ class PageManager(pool: MemoryPool, capacity: Int = 128):
 								pages.remove(id)
 								lru.remove(id)
 								pool.releasePage(entry.buffer)
+								evictions.incrementAndGet()
 								Some(id)
 						case None => None
 
 		def snapshotEntries(): List[PageEntry] = pages.values.toList
 
 		def currentCount(): Int = pages.size
+
+		def metrics(): PageManagerMetrics =
+				val pinnedCount = pages.values.map(_.meta.pinnedCount()).sum
+				PageManagerMetrics(
+						currentPages = pages.size,
+						cacheHits = hits.get(),
+						cacheMisses = misses.get(),
+						evictions = evictions.get(),
+						pinnedPages = pinnedCount,
+						freePages = pool.availablePages,
+						totalPages = pool.totalPages
+				)
