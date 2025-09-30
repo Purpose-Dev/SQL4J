@@ -1,7 +1,9 @@
 package sql4j.memory.page
 
 import sql4j.memory.off_heap.PageLayout
+
 import java.nio.ByteBuffer
+import scala.collection.mutable
 import scala.util.boundary
 
 object SlotDirectory:
@@ -83,3 +85,11 @@ object SlotDirectory:
 										val length = buf.getInt(pos + SLOT_LENGTH_OFFSET)
 										if !f(i, offset, length) then
 												boundary.break()
+
+		def liveTuples(buf: ByteBuffer): List[TupleRef] =
+				val tuples = mutable.ListBuffer.empty[TupleRef]
+				foreachLiveSlot(buf) { (idx, offset, length) =>
+						tuples += TupleRef(idx, offset, length)
+						true
+				}
+				tuples.toList
