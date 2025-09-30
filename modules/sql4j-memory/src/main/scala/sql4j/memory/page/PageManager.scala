@@ -15,22 +15,36 @@ class PageManager(pool: MemoryPool, capacity: Int = 128):
 		private val misses = AtomicLong(0L)
 		private val evictions = AtomicLong(0L)
 
-		private inline def get(pageId: PageId): Option[PageEntry] =
-				pages.get(pageId) match
-						case s@Some(_) =>
-								hits.incrementAndGet()
-								s
-						case None =>
-								misses.incrementAndGet()
-								None
+		private inline def evictOne(): Option[PageId] =
+				val victim = lru.iterator.find { case (_, e) => e.meta.pinnedCount() == 0 }
+				victim match
+						case Some((id, entry)) =>
+								pages.remove(id)
+								lru.remove(id)
+								pool.releasePage(entry.buffer)
+								evictions.incrementAndGet()
+								Some(id)
+						case None => None
 
 		private inline def touch(id: PageId, entry: PageEntry): Unit =
 				lru.remove(id)
 				lru.put(id, entry)
-				if lru.size > capacity then
+				while lru.size > capacity do
 						evictOne()
 
-		def currentEntry(pageId: PageId): Option[PageEntry] = get(pageId)
+		private inline def lookupForAccess(id: PageId): Option[PageEntry] =
+				pages.get(id) match
+						case some@Some(entry) =>
+								hits.incrementAndGet()
+								touch(id, entry)
+								some
+						case None =>
+								misses.incrementAndGet()
+								None
+
+		private inline def lookupInternal(id: PageId): Option[PageEntry] = pages.get(id)
+
+		def currentEntry(pageId: PageId): Option[PageEntry] = lookupForAccess(pageId)
 
 		def newPage(): PageEntry =
 				val buf = pool.allocatePage()
@@ -42,30 +56,24 @@ class PageManager(pool: MemoryPool, capacity: Int = 128):
 				entry
 
 		def tryPin(pageId: PageId): Boolean =
-				get(pageId) match
-						case Some(e) => e.tryPin()
+				lookupForAccess(pageId) match
+						case Some(entry) => entry.meta.tryPin()
 						case None => false
 
 		def tryUnpin(pageId: PageId): Boolean =
-				get(pageId) match
+				lookupForAccess(pageId) match
 						case Some(e) => e.tryUnpin()
 						case None => false
 
-		def pin(id: PageId): Boolean =
-				get(id) match
-						case Some(entry) if entry.meta.tryPin() =>
-								touch(id, entry)
-								true
-						case _ => false
+		def pin(id: PageId): Boolean = tryPin(id)
 
-		def unpin(id: PageId): Boolean =
-				get(id).exists(_.meta.tryUnpin())
+		def unpin(id: PageId): Boolean = tryUnpin(id)
 
 		def compareAndSwap(pageId: PageId, expected: PageEntry, update: PageEntry): Boolean =
 				if update.id != pageId then
 						throw IllegalArgumentException("update.id must match pageId")
 
-				get(pageId) match
+				lookupInternal(pageId) match
 						case Some(current) if current eq expected =>
 								pages.update(pageId, update)
 								touch(pageId, update)
@@ -73,7 +81,7 @@ class PageManager(pool: MemoryPool, capacity: Int = 128):
 						case _ => false
 
 		def free(pageId: PageId): Boolean =
-				get(pageId) match
+				lookupInternal(pageId) match
 						case Some(entry) if entry.meta.pinnedCount() == 0 =>
 								pages.remove(pageId)
 								lru.remove(pageId)
@@ -81,29 +89,17 @@ class PageManager(pool: MemoryPool, capacity: Int = 128):
 								true
 						case _ => false
 
-		def evictOne(): Option[PageId] =
-				val victim = lru.iterator.find { case (_, e) => e.meta.pinnedCount() == 0 }
-				victim match
-						case Some((id, entry)) =>
-								pages.remove(id)
-								lru.remove(id)
-								pool.releasePage(entry.buffer)
-								evictions.incrementAndGet()
-								Some(id)
-						case None => None
-
 		def snapshotEntries(): List[PageEntry] = pages.values.toList
 
 		def currentCount(): Int = pages.size
 
 		def metrics(): PageManagerMetrics =
-				val pinnedCount = pages.values.map(_.meta.pinnedCount()).sum
 				PageManagerMetrics(
 						currentPages = pages.size,
 						cacheHits = hits.get(),
 						cacheMisses = misses.get(),
 						evictions = evictions.get(),
-						pinnedPages = pinnedCount,
+						pinnedPages = pages.values.count(_.meta.pinnedCount() > 0),
 						freePages = pool.availablePages,
 						totalPages = pool.totalPages
 				)
