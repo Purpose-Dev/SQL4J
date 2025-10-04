@@ -41,7 +41,7 @@ final class PageHeader(private val buffer: ByteBuffer):
 		// Slot table start/end
 		private inline def slotTableStart: Int = PageLayout.HEADER_END
 
-		private inline def slotTableEnd: Int = slotTableStart + getNEntries * PageLayout.SLOT_BYTES
+		inline def slotTableEnd: Int = slotTableStart + getNEntries * PageLayout.SLOT_BYTES
 
 		// pageId
 		def setPageId(id: Long): Unit = putLongAtByteOffset(PageLayout.HEADER_PAGE_ID_OFFSET, id)
