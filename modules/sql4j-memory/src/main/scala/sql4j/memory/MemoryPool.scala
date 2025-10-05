@@ -22,3 +22,12 @@ class MemoryPool(val totalPages: Int):
 				freePages.push(buf)
 
 		def availablePages: Int = freePages.size
+
+		def metrics(): MemoryPoolMetrics =
+				MemoryPoolMetrics(
+						totalPages = totalPages,
+						freePages = availablePages,
+						allocatedPages = totalPages - availablePages,
+						pageSizeBytes = PageLayout.PageSize
+				)
+				
