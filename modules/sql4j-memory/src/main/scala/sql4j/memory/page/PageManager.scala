@@ -103,3 +103,13 @@ class PageManager(pool: MemoryPool, capacity: Int = 128):
 						freePages = pool.availablePages,
 						totalPages = pool.totalPages
 				)
+
+		def metricsWithFragmentation(): (PageManagerMetrics, Double, Double) =
+				val frags = pages.values.map { entry =>
+						val m = PageOps.computeMetrics(entry.buffer, PageHeader(entry.buffer))
+						m.fragmentationRatio
+				}.toList
+				val averageFragmentation = if frags.isEmpty then 0.0D else frags.sum / frags.size
+				val maxFragmentation = if frags.isEmpty then 0.0D else frags.max
+
+				(metrics(), averageFragmentation, maxFragmentation)
