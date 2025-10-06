@@ -1,8 +1,8 @@
 package sql4j.memory.page
 
-import sql4j.memory.off_heap.*
+import sql4j.memory.off_heap.PageLayout
 import sql4j.memory.off_heap.PageLayout.MetaField
-import sql4j.memory.off_heap.VarHandleHelpers.*
+import sql4j.memory.off_heap.VarHandleHelpers
 
 import java.nio.ByteBuffer
 
@@ -10,11 +10,10 @@ import java.nio.ByteBuffer
  * PageHeader: helpers to read/write header fields inside a page ByteBuffer slice.
  *
  * Important: ByteBuffer slice passed here must be positioned at the start of page (0...PageSize-1).
- * VarHandleHelpers uses element indexes (int/long indices) not byte offsets.
+ * VarHandleHelpers provides safe "AtByteOffset" wrappers that accept byte offsets.
  */
-//noinspection ScalaWeakerAccess
 object PageHeader:
-		inline def assertPageCapacity(byteBuffer: ByteBuffer): Unit =
+		private inline def assertPageCapacity(byteBuffer: ByteBuffer): Unit =
 				if byteBuffer.capacity() < PageLayout.PageSize then
 						throw new IllegalArgumentException(s"page buffer capacity ${byteBuffer.capacity()} < ${PageLayout.PageSize}")
 
@@ -53,21 +52,16 @@ final class PageHeader(private val buffer: ByteBuffer):
 
 		def getSegmentId: Long = getLongAtByteOffset(PageLayout.HEADER_SEGMENT_ID_OFFSET)
 
-		// MetaAtomic stored as a long at HEADER_META_OFFSET; we want CAS/pin increments on that field.
-		// Use VarHandleHelpers.LONG_VH operating on long-array view; convert byte-offset -> long-element index:
-		private inline def longIndexForMeta(): Int = PageLayout.HEADER_META_OFFSET / java.lang.Long.BYTES
-
+		// MetaAtomic stored as a long at HEADER_META_OFFSET; use safe wrappers that accept byte offset
 		private inline def metaOffset: Int = PageLayout.HEADER_META_OFFSET
 
-		def getMetaAtomicVolatile: Long =
-				// element index must be Int
-				getVolatileLong(buffer, metaOffset)
+		def getMetaAtomicVolatile: Long = VarHandleHelpers.getVolatileLongAtByteOffset(buffer, metaOffset)
 
 		private def compareAndSetMetaAtomic(expected: Long, update: Long): Boolean =
-				compareAndSetLong(buffer, metaOffset, expected, update)
+				VarHandleHelpers.compareAndSetLongAtByteOffset(buffer, metaOffset, expected, update)
 
 		private inline def metaAddDelta(delta: Long): Long =
-				getAndAddLong(buffer, longIndexForMeta(), delta)
+				VarHandleHelpers.getAndAddLongAtByteOffset(buffer, metaOffset, delta)
 
 		def getPinnedCountFromMeta(meta: Long): Int =
 				((meta & MetaField.PINNED_MASK) >>> MetaField.PINNED_SHIFT).toInt
@@ -109,8 +103,8 @@ final class PageHeader(private val buffer: ByteBuffer):
 				def loop(): Unit =
 						val current = getMetaAtomicVolatile
 						val flagsPart = (current & MetaField.FLAGS_MASK) >>> MetaField.FLAGS_SHIFT
-						val next = (current & ~MetaField.FLAGS_MASK) | (((flagsPart | flagMask)
-							<< MetaField.FLAGS_SHIFT) & MetaField.FLAGS_MASK)
+						val next = (current & ~MetaField.FLAGS_MASK) | (((flagsPart | flagMask) << MetaField.FLAGS_SHIFT)
+							& MetaField.FLAGS_MASK)
 						if !compareAndSetMetaAtomic(current, next) then
 								loop()
 
@@ -122,8 +116,7 @@ final class PageHeader(private val buffer: ByteBuffer):
 						val current = getMetaAtomicVolatile
 						val flagsPart = (current & MetaField.FLAGS_MASK) >>> MetaField.FLAGS_SHIFT
 						val newFlags = flagsPart & (~flagMask)
-						val next = (current & ~MetaField.FLAGS_MASK)
-							| ((newFlags << MetaField.FLAGS_SHIFT) & MetaField.FLAGS_MASK)
+						val next = (current & ~MetaField.FLAGS_MASK) | ((newFlags << MetaField.FLAGS_SHIFT) & MetaField.FLAGS_MASK)
 						if !compareAndSetMetaAtomic(current, next) then
 								loop()
 
@@ -137,9 +130,9 @@ final class PageHeader(private val buffer: ByteBuffer):
 		// LSN Field (long) at HEADER_LSN_OFFSET
 		private inline def lsnOffset: Int = PageLayout.HEADER_LSN_OFFSET
 
-		def setLsn(lsn: Long): Unit = setVolatileLong(buffer, lsnOffset, lsn)
+		def setLsn(lsn: Long): Unit = VarHandleHelpers.setVolatileLongAtByteOffset(buffer, lsnOffset, lsn)
 
-		def getLsn: Long = getVolatileLong(buffer, lsnOffset)
+		def getLsn: Long = VarHandleHelpers.getVolatileLongAtByteOffset(buffer, lsnOffset)
 
 		def getFreeSpacePointer: Int =
 				buffer.getInt(PageLayout.HEADER_FREE_POINTER_OFFSET)
@@ -156,3 +149,19 @@ final class PageHeader(private val buffer: ByteBuffer):
 
 		def canFit(size: Int): Boolean =
 				getFreeSpacePointer - size >= slotTableEnd
+
+		// Validation / Helpers (use in tests or debug)
+		def validateLayout(): Unit =
+				PageHeader.assertPageCapacity(buffer)
+				val nEntries = getNEntries
+				val maxSlots = (PageLayout.PageSize - PageLayout.HEADER_END) / PageLayout.SLOT_BYTES
+				require(nEntries >= 0 && nEntries <= maxSlots, s"invalid slot count: '$nEntries' (maxSlots=$maxSlots)")
+				val freePtr = getFreeSpacePointer
+				require(freePtr >= PageLayout.HEADER_END && freePtr <= PageLayout.PageSize, s"invalid free pointer: '$freePtr'")
+				val end = slotTableEnd
+				require(end <= PageLayout.PageSize, s"slot table overflows page: end=$end capacity=${PageLayout.PageSize}")
+
+		private inline def safePosition(pos: Int): Unit =
+				if pos < 0 || pos > buffer.capacity() then
+						throw new IllegalArgumentException(s"invalid buffer position '$pos' capacity=${buffer.capacity()}")
+				buffer.position(pos)

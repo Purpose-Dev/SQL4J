@@ -10,9 +10,9 @@ object PageMeta:
 		private val VER_BITS = 24
 
 		private val PIN_SHIFT = 0
-		private val REF_SHIFT = PIN_BITS
-		private val FLAGS_SHIFT = PIN_BITS + REF_SHIFT
-		private val VER_SHIFT = PIN_BITS + REF_BITS + FLAGS_BITS
+		private val REF_SHIFT = PIN_BITS + PIN_BITS
+		private val FLAGS_SHIFT = REF_SHIFT + REF_BITS
+		private val VER_SHIFT = FLAGS_SHIFT + FLAGS_BITS
 
 		private val PIN_MASK: Long = ((1L << PIN_BITS) - 1L) << PIN_SHIFT
 		private val REF_MASK: Long = ((1L << REF_BITS) - 1L) << REF_SHIFT
@@ -43,7 +43,7 @@ final class PageMeta(private val meta: AtomicLong):
 
 		def getRaw: Long = meta.get()
 
-		def pinnedCount(): Int = (meta.get() & PIN_MASK).toInt
+		def pinnedCount(): Int = ((meta.get() & PIN_MASK) >>> PIN_SHIFT).toInt
 
 		def refCount(): Int = ((meta.get() & REF_MASK) >>> REF_SHIFT).toInt
 
@@ -52,48 +52,71 @@ final class PageMeta(private val meta: AtomicLong):
 		def version(): Int = ((meta.get() & VER_MASK) >>> VER_SHIFT).toInt
 
 		def tryPin(): Boolean =
-				while true do
+				@annotation.tailrec
+				def loop(): Boolean =
 						val cur = meta.get()
-						val pinned = (cur & PIN_MASK).toInt
-						val flags = ((cur & FLAGS_MASK) >>> FLAGS_SHIFT).toInt
-						if (flags & R_FLAG_SEALED) != 0 || pinned == PIN_MAX then
-								return false
-						val next = cur + 1L
-						if meta.compareAndSet(cur, next) then
-								return true
-				false
+						val pinned = ((cur & PIN_MASK) >>> PIN_SHIFT).toInt
+						val flagsPart = ((cur & FLAGS_MASK) >>> FLAGS_SHIFT).toInt
+						if (flagsPart & R_FLAG_SEALED) != 0 || pinned == PIN_MAX then
+								false
+						else
+								val next = cur + (1L << PIN_SHIFT)
+								if meta.compareAndSet(cur, next) then
+										true
+								else
+										loop()
+
+				loop()
 
 		def tryUnpin(): Boolean =
-				while true do
+				@annotation.tailrec
+				def loop(): Boolean =
 						val cur = meta.get()
-						val pinned = (cur & PIN_MASK).toInt
+						val pinned = (cur & PIN_MASK >>> PIN_SHIFT).toInt
 						if pinned == 0 then
-								return false
-						val next = cur - 1L
-						if meta.compareAndSet(cur, next) then
-								return true
-				false
+								false
+						else
+								val next = cur - (1L << PIN_SHIFT)
+								if meta.compareAndSet(cur, next) then
+										true
+								else
+										loop()
+
+				loop()
 
 		def setFlag(flagMask: Long): Unit =
-				while true do
+				@annotation.tailrec
+				def loop(): Unit =
 						val cur = meta.get()
 						val next = cur | flagMask
 						if meta.compareAndSet(cur, next) then
-								return
+								()
+						else
+								loop()
+
+				loop()
 
 		def clearFlag(flagMask: Long): Unit =
-				while true do
+				def loop(): Unit =
 						val cur = meta.get()
 						val next = cur & ~flagMask
 						if meta.compareAndSet(cur, next) then
-								return
+								()
+						else
+								loop()
+
+				loop()
 
 		def bumpVersion(): Int =
-				while true do
+				@annotation.tailrec
+				def loop(): Int =
 						val cur = meta.get()
 						val ver = ((cur & VER_MASK) >>> VER_SHIFT).toInt
 						val nextVer = (ver + 1) & VER_MAX
 						val next = (cur & ~VER_MASK) | ((nextVer.toLong << VER_SHIFT) & VER_MASK)
 						if meta.compareAndSet(cur, next) then
-								return nextVer
-				-1
+								nextVer
+						else
+								loop()
+
+				loop()

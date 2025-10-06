@@ -23,24 +23,83 @@ object VarHandleHelpers:
 		private val LONG_VH: VarHandle =
 				MethodHandles.byteBufferViewVarHandle(classOf[Array[Long]], ByteOrder.nativeOrder())
 
-		inline def getVolatileInt(bb: ByteBuffer, idx: Int): Int =
+		// index conversion helpers
+		private inline def byteOffsetToLongIndex(byteOffset: Int): Int =
+				byteOffset / java.lang.Long.BYTES
+
+		private inline def byteOffsetToIntIndex(byteOffset: Int): Int =
+				byteOffset / java.lang.Integer.BYTES
+
+		// INT helpers (element, index semantics)
+		private inline def getVolatileIntElem(bb: ByteBuffer, idx: Int): Int =
 				INT_VH.getVolatile(bb, idx).asInstanceOf[Int]
 
-		inline def getAndAddInt(bb: ByteBuffer, idx: Int, delta: Int): Int =
+		private inline def getAndAddIntElem(bb: ByteBuffer, idx: Int, delta: Int): Int =
 				INT_VH.getAndAdd(bb, idx, delta).asInstanceOf[Int]
 
-		inline def compareAndSetInt(bb: ByteBuffer, idx: Int, expected: Int, newVal: Int): Boolean =
+		private inline def compareAndSetIntElem(bb: ByteBuffer, idx: Int, expected: Int, newVal: Int): Boolean =
 				INT_VH.compareAndSet(bb, idx, expected, newVal)
 
+		// safe wrappers accepting byte offsets
+		inline def getVolatileIntAtByteOffset(bb: ByteBuffer, byteOffset: Int): Int =
+				getVolatileIntElem(bb, byteOffsetToIntIndex(byteOffset))
+
+		inline def getAndAddIntAtOffset(bb: ByteBuffer, byteOffset: Int, delta: Int): Int =
+				getAndAddIntElem(bb, byteOffsetToIntIndex(byteOffset), delta)
+
+		inline def compareAndSetIntAtByteOffset(bb: ByteBuffer, byteOffset: Int, expected: Int, newVal: Int): Boolean =
+				compareAndSetIntElem(bb, byteOffsetToIntIndex(byteOffset), expected, newVal)
+
 		// ---- LONG helpers: index MUST be Int (element index), not a byte offset
-		inline def getVolatileLong(bb: ByteBuffer, byteOffset: Int): Long =
-				LONG_VH.getVolatile(bb, byteOffset).asInstanceOf[Long]
+		private inline def getVolatileLongElem(bb: ByteBuffer, elemIndex: Int): Long =
+				LONG_VH.getVolatile(bb, elemIndex).asInstanceOf[Long]
 
-		inline def setVolatileLong(bb: ByteBuffer, byteOffset: Int, value: Long): Unit =
-				LONG_VH.setVolatile(bb, byteOffset, value)
+		private inline def setVolatileLongElem(bb: ByteBuffer, elemIndex: Int, value: Long): Unit =
+				LONG_VH.setVolatile(bb, elemIndex, value)
 
-		inline def getAndAddLong(bb: ByteBuffer, byteOffset: Int, delta: Long): Long =
-				LONG_VH.getAndAdd(bb, byteOffset, delta).asInstanceOf[Long]
+		private inline def getAndAddLongElem(bb: ByteBuffer, elemIndex: Int, delta: Long): Long =
+				LONG_VH.getAndAdd(bb, elemIndex, delta).asInstanceOf[Long]
 
-		inline def compareAndSetLong(bb: ByteBuffer, byteOffset: Int, expected: Long, newVal: Long): Boolean =
-				LONG_VH.compareAndSet(bb, byteOffset, expected, newVal)
+		private inline def compareAndSetLongElem(bb: ByteBuffer, elemIndex: Int, expected: Long, newVal: Long): Boolean =
+				LONG_VH.compareAndSet(bb, elemIndex, expected, newVal)
+
+		// safe wrappers accepting byte offsets
+		inline def getVolatileLongAtByteOffset(bb: ByteBuffer, byteOffset: Int): Long =
+				val longIndex = byteOffsetToLongIndex(byteOffset)
+				try
+						getVolatileLongElem(bb, longIndex)
+				catch
+						case e: IllegalStateException if e.getMessage.contains("Misaligned") =>
+								bb.getLong(byteOffset)
+
+		inline def setVolatileLongAtByteOffset(bb: ByteBuffer, byteOffset: Int, value: Long): Unit =
+				val longIndex = byteOffsetToLongIndex(byteOffset)
+				try
+						setVolatileLongElem(bb, longIndex, value)
+				catch
+						case e: IllegalStateException if e.getMessage.contains("Misaligned") =>
+								bb.putLong(byteOffset, value)
+
+		inline def getAndAddLongAtByteOffset(bb: ByteBuffer, byteOffset: Int, delta: Long): Long =
+				val idx = byteOffsetToLongIndex(byteOffset)
+				try
+						getAndAddLongElem(bb, idx, delta)
+				catch
+						case e: IllegalStateException if e.getMessage.contains("Misaligned") =>
+								val v = bb.getLong(byteOffset)
+								val nv = v + delta
+								bb.putLong(byteOffset, nv)
+								v
+
+		inline def compareAndSetLongAtByteOffset(bb: ByteBuffer, byteOffset: Int, expected: Long, newVal: Long): Boolean =
+				val idx = byteOffsetToLongIndex(byteOffset)
+				try
+						compareAndSetLongElem(bb, idx, expected, newVal)
+				catch
+						case e: IllegalStateException if e.getMessage.contains("Misaligned") =>
+								val cur = bb.getLong(byteOffset)
+								if cur == expected then
+										bb.putLong(byteOffset, newVal)
+										true
+								else
+										false
