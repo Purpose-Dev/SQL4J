@@ -2,6 +2,7 @@ package sql4j.memory.page
 
 import sql4j.core.PageId
 import sql4j.memory.MemoryPool
+import sql4j.memory.page.metrics.PageManagerMetrics
 
 import java.util.concurrent.atomic.AtomicLong
 import scala.collection.mutable

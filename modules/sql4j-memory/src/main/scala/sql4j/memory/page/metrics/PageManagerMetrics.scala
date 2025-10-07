@@ -1,4 +1,4 @@
-package sql4j.memory.page
+package sql4j.memory.page.metrics
 
 // @formatter:off
 case class PageManagerMetrics(
@@ -8,6 +8,8 @@ case class PageManagerMetrics(
 			 evictions: Long,
 			 pinnedPages: Int,
 			 freePages: Int,
-			 totalPages: Int
+			 totalPages: Int,
+			 avgFragmentation: Double = 0.0D,
+			 maxFragmentation: Double = 0.0D
 )
 // @formatter:on
