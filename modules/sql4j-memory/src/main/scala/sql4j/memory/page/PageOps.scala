@@ -2,10 +2,14 @@ package sql4j.memory.page
 
 import sql4j.core.DbError
 import sql4j.memory.off_heap.PageLayout
+import sql4j.memory.page.metrics.PageMetrics
 
 import java.nio.ByteBuffer
 import scala.collection.mutable
 
+/**
+ * PageOps: utilities for inspecting or computing derived metrics of a Page.
+ */
 object PageOps:
 
 		private def compactPage(buf: ByteBuffer, header: PageHeader): Unit =
@@ -111,72 +115,24 @@ object PageOps:
 				if !SlotDirectory.removeSlot(buf, slotId) then
 						throw DbError.SlotNotFoundError(slotId)
 
+		/**
+		 * Compute metrics for a given page based on its header layout.
+		 */
 		def computeMetrics(buf: ByteBuffer, header: PageHeader): PageMetrics =
-				val pageSize = PageLayout.PageSize
-				val headerEnd = PageLayout.HEADER_END
+				header.validateLayout()
+
+				val nEntries = header.getNEntries
 				val freePtr = header.getFreeSpacePointer
-
-				val payloadUsed = if freePtr <= pageSize then pageSize - freePtr else 0
-
-				val liveSlots = mutable.ArrayBuffer.empty[(Int, Int)]
-				var liveCount = 0
-
-				SlotDirectory.foreachLiveSlot(buf) { (slotId, offset, length) =>
-						liveSlots.addOne((offset, length))
-						liveCount += 1
-						true
-				}
-
-				val liveBytes = liveSlots.foldLeft(0)((acc, t) => acc + t._2)
-
-				// compute the largest contiguous free region inside payload area (including holes)
-				// Approach:
-				//     - consider payload region as [headerEnd, pageSize]
-				//     - build list of live ranges sorted ascending by offset
-				//     - compute gaps between headerEnd and first range, between ranges, and between last range and pageSize
-				val ranges = liveSlots.toList.sortBy(_._1).map { case (off, len) => (off, off + len) }
-				val regions = mutable.ArrayBuffer.empty[(Int, Int)] // (start, end)
-
-				ranges.foreach { case (s, e) =>
-						val rs = math.max(s, headerEnd)
-						val re = math.min(e, pageSize)
-						if re > rs then
-								regions.addOne((rs, re))
-				}
-
-				var largestGap = 0
-				var cursor = headerEnd
-				if regions.isEmpty then
-						largestGap = math.max(largestGap, pageSize - headerEnd)
-				else
-						for ((s, e) <- regions) do
-								if s > cursor then
-										val gap = s - cursor
-										if gap > largestGap then
-												largestGap = gap
-								cursor = math.max(cursor, e)
-						// final gap after last used range
-						if cursor < pageSize then
-								val tailGap = pageSize - cursor
-								if tailGap > largestGap then
-										largestGap = tailGap
-
-				val reclaimable = math.max(0, payloadUsed - liveBytes)
-				val fragDenom = reclaimable + largestGap
-				val fragRatio =
-						if fragDenom == 0 then
-								0.0
-						else
-								reclaimable.toDouble / fragDenom.toDouble
+				val usedBytes = PageLayout.PageSize - freePtr
+				val freeBytes = freePtr - header.slotTableEnd
+				val fragmentationRatio =
+						if PageLayout.PageSize == 0 then 0.0
+						else math.max(0.0, math.min(1.0, freeBytes.toDouble / PageLayout.PageSize.toDouble))
 
 				PageMetrics(
-						pageSize = pageSize,
-						headerEnd = headerEnd,
-						freePtr = freePtr,
-						payloadUsedBytes = payloadUsed,
-						liveBytes = liveBytes,
-						reclaimableBytes = reclaimable,
-						liveSlots = liveCount,
-						largestContiguousFree = largestGap,
-						fragmentationRatio = fragRatio
+						pageId = header.getPageId,
+						usedBytes = usedBytes,
+						freeBytes = freeBytes,
+						nEntries = nEntries,
+						fragmentationRatio = fragmentationRatio
 				)
