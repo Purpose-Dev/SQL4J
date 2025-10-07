@@ -127,7 +127,7 @@ object PageOps:
 				val freeBytes = freePtr - header.slotTableEnd
 				val fragmentationRatio =
 						if PageLayout.PageSize == 0 then 0.0
-						else math.max(0.0, math.min(1.0, freeBytes.toDouble / PageLayout.PageSize.toDouble))
+						else 1.0 - (freeBytes.toDouble / PageLayout.PageSize.toDouble)
 
 				PageMetrics(
 						pageId = header.getPageId,

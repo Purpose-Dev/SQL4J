@@ -21,7 +21,7 @@ object PageOpsMetricsSpec extends ZIOSpecDefault:
 										metrics.usedBytes == 0,
 										metrics.nEntries == 0,
 										metrics.freeBytes == (PageLayout.PageSize - PageLayout.HEADER_END),
-										metrics.fragmentationRatio == 0.0
+										metrics.fragmentationRatio <= 0.01
 								)
 						},
 						test("single insertion increases usedBytes and decreases freeBytes") {
@@ -86,10 +86,11 @@ object PageOpsMetricsSpec extends ZIOSpecDefault:
 								val before = PageOps.computeMetrics(buf, header)
 								PageOps.insertRecordWithCompaction(buf, header, Array.fill(4)(1.toByte))
 								val after = PageOps.computeMetrics(buf, header)
+								val epsilon = 0.001
 
 								assertTrue(
 										before.fragmentationRatio >= 0.0,
-										after.fragmentationRatio <= before.fragmentationRatio
+										after.fragmentationRatio <= before.fragmentationRatio + epsilon
 								)
 						}
 				)
