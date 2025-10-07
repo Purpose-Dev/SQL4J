@@ -1,4 +1,4 @@
-package sql4j.memory
+package sql4j.memory.page
 
 import sql4j.memory.page.PageMeta
 import zio.{Scope, ZIO}

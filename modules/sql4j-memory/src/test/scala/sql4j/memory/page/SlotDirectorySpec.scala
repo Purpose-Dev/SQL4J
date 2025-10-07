@@ -1,9 +1,10 @@
-package sql4j.memory
+package sql4j.memory.page
 
 import sql4j.memory.off_heap.PageLayout
 import sql4j.memory.page.SlotDirectory
 import zio.Scope
 import zio.test.*
+
 import java.nio.ByteBuffer
 import scala.collection.mutable.ArrayBuffer
 

@@ -1,4 +1,4 @@
-package sql4j.memory
+package sql4j.memory.off_heap
 
 import sql4j.memory.off_heap.{OffHeapBuffer, PageLayout}
 import sql4j.memory.page.PageHeader

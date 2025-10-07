@@ -1,7 +1,8 @@
-package sql4j.memory
+package sql4j.memory.page.compaction
 
 import sql4j.memory.page.{PageHeader, PageManager, SlotDirectory}
 import sql4j.memory.page.compaction.{FragmentationStats, PageCompactor}
+import sql4j.memory.MemoryPool
 import zio.test.{assertTrue, Spec, TestEnvironment, ZIOSpecDefault}
 import zio.Scope
 

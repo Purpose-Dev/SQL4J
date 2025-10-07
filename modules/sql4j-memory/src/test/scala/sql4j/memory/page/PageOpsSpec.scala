@@ -1,12 +1,11 @@
-package sql4j.memory
+package sql4j.memory.page
 
 import sql4j.core.DbError
 import sql4j.memory.off_heap.PageLayout
 import sql4j.memory.page.{PageHeader, PageOps}
 import zio.{Exit, Scope, ZIO}
-import zio.test._
-import zio.test.Assertion._
-import zio.test.assertZIO
+import zio.test.Assertion.*
+import zio.test.*
 
 import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
