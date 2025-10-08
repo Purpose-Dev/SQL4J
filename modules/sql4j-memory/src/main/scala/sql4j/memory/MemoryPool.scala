@@ -1,6 +1,7 @@
 package sql4j.memory
 
 import sql4j.memory.off_heap.PageLayout
+import sql4j.memory.page.PageManager
 
 import java.nio.ByteBuffer
 import scala.collection.mutable
@@ -36,6 +37,20 @@ class MemoryPool(val totalPages: Int):
 						totalPages = totalPages,
 						freePages = availablePages,
 						allocatedPages = totalPages - availablePages,
-						pageSizeBytes = PageLayout.PageSize
+						pageSizeBytes = PageLayout.PageSize,
 				)
-				
+
+		/**
+		 * Return pool metrics enriched with fragmentation stats obtained from a PageManager.
+		 * Non-breaking: this is an overload that accepts a PageManager to compute fragmentation.
+		 */
+		def metricsWith(manager: PageManager): MemoryPoolMetrics =
+				val managerMetrics = manager.metrics()
+				MemoryPoolMetrics(
+						totalPages = totalPages,
+						freePages = availablePages,
+						allocatedPages = totalPages - availablePages,
+						pageSizeBytes = PageLayout.PageSize,
+						avgFragmentation = managerMetrics.avgFragmentation,
+						maxFragmentation = managerMetrics.maxFragmentation
+				)
