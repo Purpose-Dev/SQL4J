@@ -152,7 +152,7 @@ final class PageMeta(private val meta: AtomicLong):
 				@annotation.tailrec
 				def loop(): Boolean =
 						val cur = meta.get()
-						val pinned = (cur & PIN_MASK >>> PIN_SHIFT).toInt
+						val pinned = ((cur & PIN_MASK) >>> PIN_SHIFT).toInt
 						if pinned == 0 then
 								false
 						else

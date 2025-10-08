@@ -20,10 +20,10 @@ object PageReclaimer:
 		def live(pm: PageManager, pool: MemoryPool, cfg: PageReclaimerConfig = PageReclaimerConfig()): ZLayer[Any, Nothing, PageReclaimer] =
 				ZLayer.scoped {
 						for {
-								running <- Ref.make(true)
+								running <- Ref.make(false)
 								fiber <- (reclaimerLoop(pm, pool, running, cfg)).forever.forkScoped
 						} yield new PageReclaimer:
-								override def start: UIO[Unit] = running.set(false)
+								override def start: UIO[Unit] = running.set(true)
 
 								override def stop: UIO[Unit] = running.set(false)
 				}
