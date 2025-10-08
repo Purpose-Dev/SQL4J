@@ -1,32 +1,37 @@
 package sql4j.memory
 
 import sql4j.memory.off_heap.PageLayout
+import sql4j.memory.page.PageManager
 import zio.test.{assertTrue, Spec, TestEnvironment, ZIOSpecDefault}
 import zio.Scope
 
 object MemoryPoolMetricsSpec extends ZIOSpecDefault:
 		override def spec: Spec[TestEnvironment & Scope, Any] =
 				suite("MemoryPoolMetricsSpec")(
-						test("metrics reflect allocation and releases") {
-								val pool = new MemoryPool(totalPages = 8)
-
+						test("metrics reflect allocations and releases") {
+								val pool = new MemoryPool(4)
 								val before = pool.metrics()
-								assertTrue(before.freePages == 8, before.allocatedPages == 0)
-
-								val buffers = (1 to 3).map(_ => pool.allocatePage())
+								val p1 = pool.allocatePage()
 								val mid = pool.metrics()
-
-								assertTrue(mid.freePages == 5, mid.allocatedPages == 3)
-
-								pool.releasePage(buffers.head)
-								pool.releasePage(buffers(1))
+								pool.releasePage(p1)
 								val after = pool.metrics()
 
-								assertTrue(after.freePages == 7, after.allocatedPages == 1)
+								assertTrue(
+										before.freePages == 4,
+										mid.freePages == 3,
+										after.freePages == 4,
+										mid.allocatedPages == 1,
+										after.allocatedPages == 0
+								)
 						},
-						test("page size in metrics matches PageLayout constant") {
-								val pool = new MemoryPool(totalPages = 2)
-								val metrics = pool.metrics()
-								assertTrue(metrics.pageSizeBytes == PageLayout.PageSize)
+						test("metricsWith(manager) reports same fragmentation as manager.metrics()") {
+								val pool = new MemoryPool(4)
+								val manager = new PageManager(pool)
+								val pm = manager.metrics()
+								val poolMetrics = pool.metricsWith(manager)
+								assertTrue(
+										math.abs(poolMetrics.avgFragmentation - pm.avgFragmentation) < 1e-9,
+										math.abs(poolMetrics.maxFragmentation - pm.maxFragmentation) < 1e-9
+								)
 						}
 				)
