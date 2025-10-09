@@ -4,7 +4,7 @@ import sql4j.memory.off_heap.PageLayout
 import sql4j.memory.page.{PageEntry, PageHeader, SlotDirectory}
 
 import java.nio.ByteBuffer
-import scala.collection.mutable
+import scala.collection.mutable.ArrayBuffer
 
 /**
  * PageCompactor: compacts tuples inside a single page to eliminate holes.
@@ -20,65 +20,70 @@ import scala.collection.mutable
  * This is intentionally conservative (safe), not the most CPU-optimal variant.
  */
 object PageCompactor:
+		// Alias for clarity: (slotId, offset, length)
+		private type LiveTuple = (Int, Int, Int)
 
-		def compact(page: PageEntry): FragmentationStats =
-				val buffer: ByteBuffer = page.buffer
-				val header = PageHeader(buffer)
+		private def computeCompactionPlan(buffer: ByteBuffer): Option[(ArrayBuffer[LiveTuple], Array[Int], Int)] =
 				val pageSize = PageLayout.PageSize
-				val headerEnd = PageLayout.HEADER_END
 
-				// gather live tuples as (slotId, offset, length)
-				val tuples = mutable.ArrayBuffer.empty[(Int, Int, Int)]
+				val tuples = ArrayBuffer.empty[LiveTuple]
 				SlotDirectory.foreachLiveSlot(buffer) { (slotId, offset, length) =>
 						if offset >= 0 && length > 0 && offset + length <= pageSize then
 								tuples += ((slotId, offset, length))
 						true
 				}
 
-				// nothing to compact
 				if tuples.isEmpty then
-						return FragmentationStats.analyze(page)
+						None
+				else
+						val sorted = tuples.sortBy(_._2)
+						val lengths = sorted.map(_._3).toArray
 
-				// sort by original offset ascending to keep relative order
-				val sorted = tuples.sortBy(_._2)
+						val totalUsed = lengths.sum
+						val writeStart = pageSize - totalUsed
 
-				// compute total used bytes
-				val totalUsed = sorted.foldLeft(0)((acc, t) => acc + t._3)
+						val targets = new Array[Int](sorted.size)
+						var acc = writeStart
+						var i = 0
+						while i < lengths.length do
+								targets(i) = acc
+								acc += lengths(i)
+								i += 1
 
-				// compute where packed data must start so that data occupies top of page
-				val writeStart = pageSize - totalUsed
-				var writePos = writeStart
+						Some((sorted, targets, writeStart))
 
-				// temporary buffer for copy (reuse and grow as needed)
-				var tmp = Array[Byte]()
-
-				// copy each tuple into its new location and update slot
-				sorted.foreach { case (slotId, oldOff, length) =>
-						if tmp.length < length then tmp = new Array[Byte](length)
-
-						// read source bytes
-						buffer.position(oldOff)
-						buffer.get(tmp, 0, length)
-
-						// write destination bytes
-						buffer.position(writePos)
-						buffer.put(tmp, 0, length)
-
-						// update slot to point to new offset
-						SlotDirectory.writeSlot(buffer, slotId, writePos, length)
-						writePos += length
-				}
-
-				// set free pointer so future inserts follow the descending convention
+		private def setHeaderAndCheckSanity(header: PageHeader, writeStart: Int): Unit =
 				header.setFreeSpacePointer(writeStart)
-
-				// sanity check: free pointer shouldn't collide with slot table
 				if writeStart - header.slotTableEnd <= 0 then
-						// This should not happen in normal usage; throw so tests detect it early.
-						throw new IllegalStateException(s"Compaction produced freePtr=$writeStart which collides with slot table end=${header.slotTableEnd}")
+						throw new IllegalStateException(
+								s"Compaction produced freePtr=$writeStart which collides with slot table end=${header.slotTableEnd}"
+						)
 
-				// return new fragmentation stats
-				FragmentationStats.analyze(page)
+		def compact(page: PageEntry): FragmentationStats =
+				val buffer: ByteBuffer = page.buffer
+				val header = PageHeader(buffer)
+
+				computeCompactionPlan(buffer) match
+						case None => FragmentationStats.analyze(page)
+						case Some((sorted, _, writeStart)) =>
+								var tmp = Array[Byte]()
+								sorted.zipWithIndex.foreach { case ((slotId, oldOff, length), idx) =>
+										//noinspection DuplicatedCode
+										if tmp.length < length then
+												tmp = new Array[Byte](length)
+
+										buffer.position(oldOff)
+										buffer.get(tmp, 0, length)
+
+										val newOff = writeStart + sorted.take(idx).map(_._3).sum
+										buffer.position(newOff)
+										buffer.put(tmp, 0, length)
+
+										SlotDirectory.writeSlot(buffer, slotId, newOff, length)
+								}
+
+								setHeaderAndCheckSanity(header, writeStart)
+								FragmentationStats.analyze(page)
 
 		def compactIfNeeded(page: PageEntry, policy: CompactionPolicy): FragmentationStats =
 				val stats = FragmentationStats.analyze(page)
@@ -86,3 +91,54 @@ object PageCompactor:
 						compact(page)
 				else
 						stats
+
+		/**
+		 * Incremental compaction step with a work budget in bytes.
+		 * This recomputes the target packed layout each time and moves tuples whose current
+		 * offset does not match the target, up to the provided budget. It is stateless and safe
+		 * to call repeatedly; progress is derived from current slot offsets.
+		 *
+		 * @return (processedBytes, done)
+		 */
+		def compactStep(page: PageEntry, budgetBytes: Int): (Int, Boolean) =
+				require(budgetBytes > 0, s"budgetBytes must be > 0, was $budgetBytes")
+				val buffer: ByteBuffer = page.buffer
+				val header = PageHeader(buffer)
+
+				computeCompactionPlan(buffer) match
+						case None => (0, true)
+						case Some((sorted, targets, writeStart)) =>
+								var processed = 0
+								var idx = 0
+								var tmp = Array[Byte]()
+
+								var startIdx = 0
+								while startIdx < sorted.length && sorted(startIdx)._2 == targets(startIdx) do
+										startIdx += 1
+
+								idx = startIdx
+
+								while idx < sorted.length && processed + sorted(idx)._3 <= budgetBytes do
+										val (slotId, currentOffset, length) = sorted(idx)
+										val target = targets(idx)
+
+										if currentOffset != target then
+												//noinspection DuplicatedCode
+												if tmp.length < length then
+														tmp = new Array[Byte](length)
+												buffer.position(currentOffset)
+												buffer.get(tmp, 0, length)
+												buffer.position(target)
+												buffer.put(tmp, 0, length)
+												SlotDirectory.writeSlot(buffer, slotId, target, length)
+										end if
+										processed += length
+										idx += 1
+								end while
+
+								val isDone = startIdx == sorted.length
+
+								if isDone then
+										setHeaderAndCheckSanity(header, writeStart)
+
+								(processed, isDone)
