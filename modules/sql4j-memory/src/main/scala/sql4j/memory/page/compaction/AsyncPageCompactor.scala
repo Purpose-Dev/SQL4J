@@ -41,16 +41,32 @@ object AsyncPageCompactor:
 
 		private def workerLoop(pm: PageManager, q: Queue[PageId], running: Ref[Boolean], cfg: AsyncCompactorConfig): ZIO[Scope, Nothing, Unit] =
 				def processOnce(id: PageId): UIO[Unit] =
-						ZIO.logDebug(s"AsyncCompactor: compacting pageId=$id") *>
-							ZIO.attempt {
-									pm.currentEntry(id).foreach(PageCompactor.compact)
-							}.catchAll(e => ZIO.logDebug(s"Compaction failed for $id: ${e.getMessage}")).ignore
+						ZIO.logDebug(s"AsyncCompactor: starting compaction pageId=$id") *>
+							ZIO.succeed(pm.currentEntry(id)).flatMap {
+									case None => ZIO.unit
+									case Some(entry) =>
+											def loop: UIO[Unit] =
+													ZIO.attempt(PageCompactor.compactStep(entry, cfg.maxBytesPerIteration)).foldZIO(
+															e => ZIO.logDebug(s"Compaction step failed for $id: ${e.getMessage}").unit,
+															{ case (_, done) =>
+																	if done then
+																			ZIO.unit
+																	else
+																			ZIO.yieldNow *> loop
+															}
+													)
+
+											loop *> ZIO.logDebug(s"AsyncCompactor: finished compaction pageId=$id")
+							}
 
 				def loop: ZIO[Scope, Nothing, Unit] =
 						running.get.flatMap {
 								case false => ZIO.unit
 								case true =>
-										q.take.flatMap(processOnce) *> ZIO.sleep(cfg.pollIntervalMs.millis) *> loop
+										q.poll.flatMap {
+												case Some(pageId) => processOnce(pageId)
+												case None => ZIO.unit
+										} *> ZIO.sleep(cfg.pollIntervalMs.millis) *> loop
 						}
 
 				loop
