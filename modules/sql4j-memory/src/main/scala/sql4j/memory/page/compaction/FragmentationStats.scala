@@ -50,30 +50,33 @@ object FragmentationStats:
 
 				val tuples = mutable.ArrayBuffer.empty[(Int, Int)]
 				SlotDirectory.foreachLiveSlot(buffer) { (slotId, offset, length) =>
-						val start = Math.max(offset, headerEnd)
-						val end = Math.min(offset + length, pageSize)
-						if end > start then
-								tuples += ((start, end - start))
+						if offset >= headerEnd && offset + length <= pageSize && length > 0 then
+								tuples += ((offset, length))
 						true
 				}
 
-				val used = tuples.foldLeft(0)((acc, t) => acc + t._2)
+				val used = tuples.map(_._2).sum
 				val headerReportedFree =
-						if freePtr <= pageSize then
+						if freePtr >= headerEnd && freePtr <= pageSize then
 								pageSize - freePtr
 						else
 								0
 
 				val sorted = tuples.toList.sortBy(_._1)
 				var holes = 0
-				var cursor = headerEnd
+
 				if sorted.nonEmpty then
-						for ((s, len) <- sorted) do
-								if s > cursor then
+						// Count gaps between consecutive tuples
+						var i = 0
+						while i < sorted.length - 1 do
+								val (currentOffset, currentLen) = sorted(i)
+								val currentEnd = currentOffset + currentLen
+								val (nextOffset, _) = sorted(i + 1)
+
+								// If there's a gap between this tuple and the next, count it as a hole
+								if nextOffset > currentEnd then
 										holes += 1
-										cursor = Math.max(cursor, s + len)
-				else
-						holes = 0
+								i += 1
 
 				FragmentationStats(
 						totalSpace = totalPayload,
