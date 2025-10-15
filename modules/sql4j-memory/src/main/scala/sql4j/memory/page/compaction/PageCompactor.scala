@@ -64,22 +64,31 @@ object PageCompactor:
 				val header = PageHeader(buffer)
 
 				computeCompactionPlan(buffer) match
-						case None => FragmentationStats.analyze(page)
-						case Some((sorted, _, writeStart)) =>
-								var tmp = Array[Byte]()
-								sorted.zipWithIndex.foreach { case ((slotId, oldOff, length), idx) =>
+						case None =>
+								header.setFreeSpacePointer(PageLayout.PageSize)
+								FragmentationStats.analyze(page)
+						case Some((sorted, targets, writeStart)) =>
+								val allData = ArrayBuffer[Byte]()
+
+								sorted.foreach { case (slotId, oldOff, length) =>
 										//noinspection DuplicatedCode
-										if tmp.length < length then
-												tmp = new Array[Byte](length)
-
+										val data = new Array[Byte](length)
 										buffer.position(oldOff)
-										buffer.get(tmp, 0, length)
+										buffer.get(data)
+										allData.appendAll(data)
+								}
 
-										val newOff = writeStart + sorted.take(idx).map(_._3).sum
-										buffer.position(newOff)
-										buffer.put(tmp, 0, length)
+								// Now write it all back contiguously
+								val dataArray = allData.toArray
+								buffer.position(writeStart)
+								buffer.put(dataArray)
 
-										SlotDirectory.writeSlot(buffer, slotId, newOff, length)
+								// Update all slot pointers
+								var offset = writeStart
+								sorted.indices.foreach { idx =>
+										val (slotId, _, length) = sorted(idx)
+										SlotDirectory.writeSlot(buffer, slotId, offset, length)
+										offset += length
 								}
 
 								setHeaderAndCheckSanity(header, writeStart)
@@ -94,11 +103,17 @@ object PageCompactor:
 
 		/**
 		 * Incremental compaction step with a work budget in bytes.
-		 * This recomputes the target packed layout each time and moves tuples whose current
-		 * offset does not match the target, up to the provided budget. It is stateless and safe
-		 * to call repeatedly; progress is derived from current slot offsets.
 		 *
-		 * @return (processedBytes, done)
+		 * Strategy: Since all tuples are moving DOWN in the page (toward the end),
+		 * we can safely process them in order from the lowest offset to the highest.
+		 * This ensures we never overwrite data we haven't moved yet.
+		 *
+		 * The algorithm is stateless - it recomputes the plan each time and resumes
+		 * from where it left off based on which tuples are already at their targets.
+		 *
+		 * @param page        the page to compact
+		 * @param budgetBytes maximum bytes of tuple data to move in this call
+		 * @return (bytesProcessed, isDone)
 		 */
 		def compactStep(page: PageEntry, budgetBytes: Int): (Int, Boolean) =
 				require(budgetBytes > 0, s"budgetBytes must be > 0, was $budgetBytes")
@@ -106,39 +121,43 @@ object PageCompactor:
 				val header = PageHeader(buffer)
 
 				computeCompactionPlan(buffer) match
-						case None => (0, true)
+						case None =>
+								header.setFreeSpacePointer(PageLayout.PageSize)
+								(0, true)
 						case Some((sorted, targets, writeStart)) =>
-								var processed = 0
-								var idx = 0
-								var tmp = Array[Byte]()
+								// Find tuples that need moving and process them in order
+								val needsMoving = sorted.indices.filter(idx => sorted(idx)._2 != targets(idx))
 
-								var startIdx = 0
-								while startIdx < sorted.length && sorted(startIdx)._2 == targets(startIdx) do
-										startIdx += 1
-
-								idx = startIdx
-
-								while idx < sorted.length && processed + sorted(idx)._3 <= budgetBytes do
-										val (slotId, currentOffset, length) = sorted(idx)
-										val target = targets(idx)
-
-										if currentOffset != target then
-												//noinspection DuplicatedCode
-												if tmp.length < length then
-														tmp = new Array[Byte](length)
-												buffer.position(currentOffset)
-												buffer.get(tmp, 0, length)
-												buffer.position(target)
-												buffer.put(tmp, 0, length)
-												SlotDirectory.writeSlot(buffer, slotId, target, length)
-										end if
-										processed += length
-										idx += 1
-								end while
-
-								val isDone = startIdx == sorted.length
-
-								if isDone then
+								if needsMoving.isEmpty then
 										setHeaderAndCheckSanity(header, writeStart)
+										(0, true)
+								else
+										// Allocate buffer for the largest tuple we might move
+										val maxLength = needsMoving.map(idx => sorted(idx)._3).max
+										val tmp = new Array[Byte](maxLength)
 
-								(processed, isDone)
+										// Process tuples within a budget
+										val (processed, moved) = needsMoving.foldLeft((0, 0)) {
+												case (acc@(totalProcessed, totalMoved), idx) =>
+														val (slotId, currentOff, length) = sorted(idx)
+														val targetOff = targets(idx)
+
+														if totalProcessed + length <= budgetBytes then
+																// Move this tuple
+																buffer.position(currentOff)
+																buffer.get(tmp, 0, length)
+																buffer.position(targetOff)
+																buffer.put(tmp, 0, length)
+																SlotDirectory.writeSlot(buffer, slotId, targetOff, length)
+
+																(totalProcessed + length, totalMoved + 1)
+														else
+																acc // Budget exhausted, stop processing
+										}
+
+										val isDone = moved >= needsMoving.length
+
+										if isDone then
+												setHeaderAndCheckSanity(header, writeStart)
+
+										(processed, isDone)
