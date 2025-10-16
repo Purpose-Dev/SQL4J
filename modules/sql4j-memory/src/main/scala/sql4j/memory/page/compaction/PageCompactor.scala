@@ -104,9 +104,10 @@ object PageCompactor:
 		/**
 		 * Incremental compaction step with a work budget in bytes.
 		 *
-		 * Strategy: Since all tuples are moving DOWN in the page (toward the end),
-		 * we can safely process them in order from the lowest offset to the highest.
-		 * This ensures we never overwrite data we haven't moved yet.
+		 * Strategy: Tuples generally move toward higher offsets (toward the page end)
+		 * when eliminating holes. To avoid overlapping-copy corruption, a process moves
+		 * from the highest current offset down to the lowest. This ensures we never
+		 * overwrite the source of a tuple that has not been moved yet.
 		 *
 		 * The algorithm is stateless - it recomputes the plan each time and resumes
 		 * from where it left off based on which tuples are already at their targets.
@@ -125,7 +126,7 @@ object PageCompactor:
 								header.setFreeSpacePointer(PageLayout.PageSize)
 								(0, true)
 						case Some((sorted, targets, writeStart)) =>
-								// Find tuples that need moving and process them in order
+								// Find tuples that need moving and order them by current offset descending
 								val needsMoving = sorted.indices.filter(idx => sorted(idx)._2 != targets(idx))
 
 								if needsMoving.isEmpty then
@@ -136,8 +137,11 @@ object PageCompactor:
 										val maxLength = needsMoving.map(idx => sorted(idx)._3).max
 										val tmp = new Array[Byte](maxLength)
 
-										// Process tuples within a budget
-										val (processed, moved) = needsMoving.foldLeft((0, 0)) {
+										// Determine safe move order: highest current offset to lowest
+										val moveOrder = needsMoving.sortBy(idx => sorted(idx)._2).reverse
+
+										// Process tuples within a budget following the safe order
+										val (processed, moved) = moveOrder.foldLeft((0, 0)) {
 												case (acc@(totalProcessed, totalMoved), idx) =>
 														val (slotId, currentOff, length) = sorted(idx)
 														val targetOff = targets(idx)
